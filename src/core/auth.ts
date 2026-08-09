@@ -191,7 +191,7 @@ export async function loginAsync(
 
 /**
  * Login: Promise API, or legacy `login(credentials, (err, api) => …)` like classic FCA.
- * For `const login = require('@dongdev/fca-unofficial')`, use the published `dist/cjs.cjs` entry.
+ * For `const login = require('@cexy/wonfca')`, use the published `dist/cjs.cjs` entry.
  */
 export function login(
   credentials: LoginCredentials,

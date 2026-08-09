@@ -47,7 +47,7 @@ export interface LoadedFcaConfig {
 }
 
 const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
-const DEFAULT_PACKAGE_NAME = "@dongdev/fca-unofficial";
+const DEFAULT_PACKAGE_NAME = "@cexy/wonfca";
 
 export const defaultConfig: FcaConfig = {
   autoUpdate: true,

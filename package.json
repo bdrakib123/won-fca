@@ -25,7 +25,7 @@
     "test:build": "npm run build && node ./test/fca.test.cjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean --out-dir dist --external gradient-string && node scripts/cjs-bridge.cjs",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean --out-dir dist --external gradient-string --external form-data --external combined-stream && node scripts/cjs-bridge.cjs",
     "build:types": "tsc -p tsconfig.build.json --emitDeclarationOnly"
   },
   "repository": {
@@ -61,7 +61,7 @@
   "bugs": {
     "url": "https://github.com/bdrakib123/won-fca/issues"
   },
-  "homepage": "https://github.com/dongp06/fca-unofficial#readme",
+  "homepage": "https://github.com/cexy/won-fca#readme",
   "engines": {
     "node": ">=14.0.0"
   },

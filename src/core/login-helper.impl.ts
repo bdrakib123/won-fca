@@ -984,7 +984,7 @@ function loginHelper(
               logger(`Database connection failed: ${errorMsg}`, "warn");
             }
           });
-        logger("FCA fix/update by DongDev (Donix-VN)", "info");
+        logger("FCA fix/update by Cexy (WonFCA)", "info");
         const emitter = new EventEmitter();
         const ctxMain = createFcaState({
           userID,
