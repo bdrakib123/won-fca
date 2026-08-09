@@ -212,7 +212,7 @@ export function createGetThreadListQuery(deps: GetThreadListQueryDeps) {
         av: ctx.userID,
         queries: JSON.stringify({
           o0: {
-            doc_id: "3336396659757871",
+            doc_id: "3426149104143726",
             query_params: {
               limit: limit + (timestamp ? 1 : 0),
               before: timestamp,
