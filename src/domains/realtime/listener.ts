@@ -38,7 +38,7 @@ interface RealtimeListenerDeps {
 }
 
 const MQTT_DEFAULTS = {
-  cycleMs: CYCLE_MS_DEFAULT,
+  cycleMs: 0,
   reconnectDelayMs: RECONNECT_DELAY_MS_DEFAULT,
   autoReconnect: true,
   reconnectAfterStop: false
@@ -103,6 +103,16 @@ export function createRealtimeListener(deps: RealtimeListenerDeps) {
         return Promise.resolve();
       }
 
+      if (ctx._getSeqInFlight) {
+        logger(
+          "mqtt getSeqID skipped - already in progress",
+          "warn"
+        );
+        return Promise.resolve();
+      }
+
+      ctx._getSeqInFlight = true;
+
       if (ctx._getSeqRetryTimer) {
         clearTimeout(ctx._getSeqRetryTimer);
         ctx._getSeqRetryTimer = null;
@@ -129,9 +139,12 @@ export function createRealtimeListener(deps: RealtimeListenerDeps) {
         .then(() => {
           logger("mqtt getSeqID done", "info");
           ctx._cycling = false;
+          ctx._getSeqInFlight = false;
         })
         .catch((error: Loose) => {
           ctx._cycling = false;
+          ctx._getSeqInFlight = false;
+
           const message = error && error.message ? error.message : String(error || "Unknown error");
           logger(`mqtt getSeqID error: ${message}`, "error");
           if (ctx._ending) {
@@ -222,6 +235,9 @@ export function createRealtimeListener(deps: RealtimeListenerDeps) {
           clearTimeout(ctx._getSeqRetryTimer);
           ctx._getSeqRetryTimer = null;
         }
+
+        ctx._getSeqInFlight = false;
+
         if (ctx._rTimeout) {
           clearTimeout(ctx._rTimeout);
           ctx._rTimeout = null;
@@ -272,8 +288,27 @@ export function createRealtimeListener(deps: RealtimeListenerDeps) {
 
     function delayedReconnect() {
       const delay = conf.reconnectDelayMs;
+
+      if (ctx._reconnectTimer) {
+        clearTimeout(ctx._reconnectTimer);
+        ctx._reconnectTimer = null;
+      }
+
       logger(`mqtt reconnect in ${delay}ms`, "info");
-      setTimeout(() => getSeqIDWrapper(), delay);
+
+      ctx._reconnectTimer = setTimeout(() => {
+        ctx._reconnectTimer = null;
+
+        if (ctx._ending) {
+          logger(
+            "mqtt reconnect skipped - session ending",
+            "warn"
+          );
+          return;
+        }
+
+        getSeqIDWrapper();
+      }, delay);
     }
 
     function forceCycle() {
