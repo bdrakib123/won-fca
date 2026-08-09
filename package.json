@@ -1,6 +1,6 @@
 {
   "name": "@cexy/wonfca",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
   "main": "dist/cjs.cjs",
   "types": "dist/index.d.ts",
