@@ -65,9 +65,12 @@ function formatThreadGraphQLResponse(data: Loose): ThreadInfo {
   return {
     threadID,
     threadName: messageThread.name || null,
-    participantIDs: (messageThread.all_participants?.edges || []).map(
-      (entry: Loose) => String(entry.node?.messaging_actor?.id || "")
-    ),
+    participantIDs: Array.isArray(messageThread.all_participants?.edges)
+      ? messageThread.all_participants.edges
+          .map((entry: Loose) => entry?.node?.messaging_actor?.id)
+          .filter((id: Loose) => id != null && String(id).length > 0)
+          .map((id: Loose) => String(id))
+      : [],
     userInfo: (messageThread.all_participants?.edges || []).map((entry: Loose) => ({
       id: String(entry.node?.messaging_actor?.id || ""),
       name: entry.node?.messaging_actor?.name || null,
@@ -206,6 +209,10 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
         batch_name: "MessengerGraphQLThreadFetcher"
       }
     });
+
+    console.log("========== THREAD GRAPHQL ==========");
+    console.dir(resData, { depth: 12 });
+    console.log("========== END THREAD GRAPHQL ==========");
 
     if ((resData as Loose)?.error) {
       throw resData;
