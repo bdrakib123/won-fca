@@ -210,9 +210,6 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
       }
     });
 
-    console.log("========== THREAD GRAPHQL ==========");
-    console.dir(resData, { depth: 12 });
-    console.log("========== END THREAD GRAPHQL ==========");
 
     if ((resData as Loose)?.error) {
       throw resData;
