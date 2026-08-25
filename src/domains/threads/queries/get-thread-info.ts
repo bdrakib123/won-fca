@@ -168,9 +168,31 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
       const row = rows[index] as Loose;
 
       if (row?.data) {
-        const updatedAt = row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
-        if (updatedAt && now - updatedAt <= FRESH_MS) {
-          fresh[id] = row.data as ThreadInfo;
+        const data = row.data as Loose;
+
+        // Never trust incomplete cached thread info.
+        // A valid thread info response must contain
+        // member/participant information.
+        const hasMembers =
+          Array.isArray(data.userInfo) ||
+          Array.isArray(data.participantIDs) ||
+          Array.isArray(data.participants);
+
+        const hasThreadData =
+          Boolean(data.threadID) &&
+          data.threadName !== undefined &&
+          hasMembers;
+
+        const updatedAt = row.updatedAt
+          ? new Date(row.updatedAt).getTime()
+          : 0;
+
+        if (
+          hasThreadData &&
+          updatedAt &&
+          now - updatedAt <= FRESH_MS
+        ) {
+          fresh[id] = data as ThreadInfo;
         } else {
           stale.push(id);
         }
