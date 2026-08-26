@@ -204,55 +204,107 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
     return { fresh, stale };
   }
 
-  async function fetchFromGraphQL(ids: string[]): Promise<Record<string, ThreadInfo>> {
+  const PRIMARY_THREAD_INFO_DOC_ID = "3449967031715030";
+  const FALLBACK_THREAD_INFO_DOC_ID = "3336396659757871";
+
+  async function fetchFromGraphQL(
+    ids: string[]
+  ): Promise<Record<string, ThreadInfo>> {
     if (!ids.length) {
       return {};
     }
 
-    const queries: Record<string, Loose> = {};
-    ids.forEach((id, index) => {
-      queries[`o${index}`] = {
-        doc_id: "3449967031715030",
-        query_params: {
-          id,
-          message_limit: 0,
-          load_messages: false,
-          load_read_receipts: false,
-          before: null
+    const fetchWithDocId = async (docId: string) => {
+      const queries: Record<string, Loose> = {};
+
+      ids.forEach((id, index) => {
+        queries[`o${index}`] = {
+          doc_id: docId,
+          query_params: {
+            id,
+            message_limit: 0,
+            load_messages: false,
+            load_read_receipts: false,
+            before: null
+          }
+        };
+      });
+
+      return postGraphqlBatch({
+        defaultFuncs,
+        ctx,
+        form: {
+          queries: JSON.stringify(queries),
+          batch_name: "MessengerGraphQLThreadFetcher"
         }
-      };
-    });
+      });
+    };
 
-    const resData = await postGraphqlBatch({
-      defaultFuncs,
-      ctx,
-      form: {
-        queries: JSON.stringify(queries),
-        batch_name: "MessengerGraphQLThreadFetcher"
+    const parseResponse = (
+      resData: Loose
+    ): Record<string, ThreadInfo> => {
+      if ((resData as Loose)?.error) {
+        throw resData;
       }
-    });
 
+      const result: Record<string, ThreadInfo> = {};
+      const entries = Array.isArray(resData)
+        ? (resData as Loose[])
+        : [];
 
-    if ((resData as Loose)?.error) {
-      throw resData;
+      for (let index = entries.length - 2; index >= 0; index -= 1) {
+        const item = entries[index] || {};
+        const key = Object.keys(item)[0];
+
+        if (!key) {
+          continue;
+        }
+
+        const responseData = item[key];
+
+        try {
+          const info = formatThreadGraphQLResponse(
+            responseData?.data as Loose
+          );
+
+          if (info?.threadID) {
+            result[info.threadID] = info;
+          }
+        } catch {
+          // Ignore invalid/missing thread info responses.
+        }
+      }
+
+      return result;
+    };
+
+    // Primary
+    let result: Record<string, ThreadInfo> = {};
+
+    try {
+      const primaryResponse = await fetchWithDocId(
+        PRIMARY_THREAD_INFO_DOC_ID
+      );
+
+      result = parseResponse(primaryResponse);
+
+      // If primary returned valid thread info, use it.
+      if (Object.keys(result).length > 0) {
+        return result;
+      }
+    } catch {
+      // Try fallback below.
     }
 
-    const result: Record<string, ThreadInfo> = {};
-    const entries = Array.isArray(resData) ? (resData as Loose[]) : [];
+    // Fallback
+    try {
+      const fallbackResponse = await fetchWithDocId(
+        FALLBACK_THREAD_INFO_DOC_ID
+      );
 
-    for (let index = entries.length - 2; index >= 0; index -= 1) {
-      const item = entries[index] || {};
-      const key = Object.keys(item)[0];
-      const responseData = item[key];
-
-      try {
-        const info = formatThreadGraphQLResponse(responseData?.data as Loose);
-        if (info?.threadID) {
-          result[info.threadID] = info;
-        }
-      } catch (error: Loose) {
-        // Ignore invalid/missing thread info responses.
-      }
+      result = parseResponse(fallbackResponse);
+    } catch {
+      // Both queries failed; return empty result.
     }
 
     return result;
