@@ -205,7 +205,6 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
   }
 
   const PRIMARY_THREAD_INFO_DOC_ID = "3449967031715030";
-  const FALLBACK_THREAD_INFO_DOC_ID = "3336396659757871";
 
   async function fetchFromGraphQL(
     ids: string[]
@@ -252,7 +251,7 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
         ? (resData as Loose[])
         : [];
 
-      for (let index = entries.length - 2; index >= 0; index -= 1) {
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
         const item = entries[index] || {};
         const key = Object.keys(item)[0];
 
@@ -278,7 +277,6 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
       return result;
     };
 
-    // Primary
     let result: Record<string, ThreadInfo> = {};
 
     try {
@@ -288,26 +286,11 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
 
       result = parseResponse(primaryResponse);
 
-      // If primary returned valid thread info, use it.
-      if (Object.keys(result).length > 0) {
-        return result;
-      }
-    } catch {
-      // Try fallback below.
+      return result;
+    } catch (error) {
+      logError?.("getThreadInfo", error);
+      return {};
     }
-
-    // Fallback
-    try {
-      const fallbackResponse = await fetchWithDocId(
-        FALLBACK_THREAD_INFO_DOC_ID
-      );
-
-      result = parseResponse(fallbackResponse);
-    } catch {
-      // Both queries failed; return empty result.
-    }
-
-    return result;
   }
 
   async function persist(ids: string[], fetched: Record<string, ThreadInfo>) {
