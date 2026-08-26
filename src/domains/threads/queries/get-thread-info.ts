@@ -50,10 +50,6 @@ function formatThreadGraphQLResponse(data: Loose): ThreadInfo {
 
   const messageThread = data?.message_thread;
   if (!messageThread) {
-    console.error(
-      "[getThreadInfo] Missing message_thread:",
-      JSON.stringify(data, null, 2)
-    );
     throw new Error("No message_thread in GraphQL response");
   }
 
@@ -255,7 +251,7 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
           result[info.threadID] = info;
         }
       } catch (error: Loose) {
-        logError?.("getThreadInfoGraphQL", error?.message || String(error));
+        // Ignore invalid/missing thread info responses.
       }
     }
 
