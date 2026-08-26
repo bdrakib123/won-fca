@@ -167,9 +167,6 @@ function formatThreadList(data: Loose[], logError?: (scope: string, error: Loose
   });
 }
 
-const PRIMARY_THREAD_LIST_DOC_ID = "3426149104143726";
-const FALLBACK_THREAD_LIST_DOC_ID = "3336396659757871";
-
 export function createGetThreadListQuery(deps: GetThreadListQueryDeps) {
   const { defaultFuncs, ctx, logError } = deps;
 
@@ -208,31 +205,26 @@ export function createGetThreadListQuery(deps: GetThreadListQueryDeps) {
 
     const { callback: cb, promise } = createLegacyPromise<ThreadListItem[]>(effectiveCallback, []);
 
-    const queryParams = {
-      limit: limit + (timestamp ? 1 : 0),
-      before: timestamp,
-      tags: effectiveTags,
-      includeDeliveryReceipts: true,
-      includeSeqID: false
-    };
-
-    const fetchThreadList = (docId: string) =>
-      postGraphqlBatch({
-        defaultFuncs,
-        ctx,
-        form: {
-          av: ctx.userID,
-          queries: JSON.stringify({
-            o0: {
-              doc_id: docId,
-              query_params: queryParams
+    postGraphqlBatch({
+      defaultFuncs,
+      ctx,
+      form: {
+        av: ctx.userID,
+        queries: JSON.stringify({
+          o0: {
+            doc_id: "3426149104143726",
+            query_params: {
+              limit: limit + (timestamp ? 1 : 0),
+              before: timestamp,
+              tags: effectiveTags,
+              includeDeliveryReceipts: true,
+              includeSeqID: false
             }
-          }),
-          batch_name: "MessengerGraphQLThreadlistFetcher"
-        }
-      });
-
-    fetchThreadList(PRIMARY_THREAD_LIST_DOC_ID)
+          }
+        }),
+        batch_name: "MessengerGraphQLThreadlistFetcher"
+      }
+    })
       .then((resData: Loose) => {
         if (!Array.isArray(resData) || resData.length === 0) {
           throw { error: "getThreadList: Invalid response data" };
@@ -266,45 +258,8 @@ export function createGetThreadListQuery(deps: GetThreadListQueryDeps) {
         cb(null, formatThreadList(nodes, logError));
       })
       .catch((error: Loose) => {
-        logError?.("getThreadList primary doc_id failed, trying fallback", error);
-
-        return fetchThreadList(FALLBACK_THREAD_LIST_DOC_ID)
-          .then((resData: Loose) => {
-            if (!Array.isArray(resData) || resData.length === 0) {
-              throw { error: "getThreadList: Invalid fallback response data" };
-            }
-
-            const last = resData[resData.length - 1];
-            if (!last || typeof last !== "object") {
-              throw { error: "getThreadList: Invalid fallback response tail" };
-            }
-
-            if (last.error_results > 0) {
-              if (resData[0]?.o0?.errors) {
-                throw resData[0].o0.errors;
-              }
-              throw { error: "getThreadList: fallback error_results > 0" };
-            }
-
-            if (last.successful_results === 0) {
-              throw { error: "getThreadList: fallback had no successful_results" };
-            }
-
-            const nodes = resData?.[0]?.o0?.data?.viewer?.message_threads?.nodes;
-            if (!Array.isArray(nodes)) {
-              throw { error: "getThreadList: Invalid fallback payload structure" };
-            }
-
-            if (timestamp && nodes.length > 0) {
-              nodes.shift();
-            }
-
-            cb(null, formatThreadList(nodes, logError));
-          })
-          .catch((fallbackError: Loose) => {
-            logError?.("getThreadList fallback", fallbackError);
-            cb(fallbackError);
-          });
+        logError?.("getThreadList", error);
+        cb(error);
       });
 
     return promise;

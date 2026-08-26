@@ -50,10 +50,6 @@ function formatThreadGraphQLResponse(data: Loose): ThreadInfo {
 
   const messageThread = data?.message_thread;
   if (!messageThread) {
-    console.error(
-      "[getThreadInfo] Missing message_thread:",
-      JSON.stringify(data, null, 2)
-    );
     throw new Error("No message_thread in GraphQL response");
   }
 
