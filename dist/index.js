@@ -5304,7 +5304,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.2",
+      version: "1.1.3",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -10942,7 +10942,7 @@ var init_get_thread_list = __esm({
     init_graphql();
     import_format11 = __toESM(require_format());
     ({ formatID: formatID2, getType: getType12 } = import_format11.default);
-    PRIMARY_THREAD_LIST_DOC_ID = "3426149104143726";
+    PRIMARY_THREAD_LIST_DOC_ID = "3336396659757871";
     FALLBACK_THREAD_LIST_DOC_ID = "3336396659757871";
   }
 });

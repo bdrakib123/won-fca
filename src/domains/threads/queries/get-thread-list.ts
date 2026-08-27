@@ -167,7 +167,7 @@ function formatThreadList(data: Loose[], logError?: (scope: string, error: Loose
   });
 }
 
-const PRIMARY_THREAD_LIST_DOC_ID = "3426149104143726";
+const PRIMARY_THREAD_LIST_DOC_ID = "3336396659757871";
 const FALLBACK_THREAD_LIST_DOC_ID = "3336396659757871";
 
 export function createGetThreadListQuery(deps: GetThreadListQueryDeps) {
