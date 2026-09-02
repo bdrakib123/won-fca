@@ -5301,7 +5301,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.3",
+      version: "1.1.4",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -16500,14 +16500,66 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           return resp;
         }
       };
-      if (appState || Cookie) {
-        const initial = await get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
-        return await ctx.bypassAutomation(initial, jar2) || initial;
-      }
-      const hydrated = await hydrateJarFromDB(null);
+      const suppliedAppState = Array.isArray(appState) ? appState.map((c) => ({ ...c })) : null;
+      const backupUserID = userIDFromAppState && userIDFromAppState !== "0" && /^\d+$/.test(String(userIDFromAppState)) && parseInt(String(userIDFromAppState), 10) > 0 ? String(userIDFromAppState) : null;
+      const hydrated = await hydrateJarFromDB(backupUserID);
       if (hydrated) {
-        logger_default("AppState backup live \u2014 proceeding to login", "info");
-        const initial = await get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
+        logger_default(
+          `AppState backup found${backupUserID ? ` for USER_ID=${backupUserID}` : ""} \u2014 testing backup session first`,
+          "info"
+        );
+        try {
+          const backupInitial = await get2(
+            "https://www.facebook.com/",
+            jar2,
+            null,
+            globalOptions
+          ).then(saveCookies(jar2));
+          const backupProcessed = await ctx.bypassAutomation(backupInitial, jar2) || backupInitial;
+          const backupHtml = backupProcessed && backupProcessed.data ? String(backupProcessed.data) : "";
+          const backupUID = backupHtml.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || backupHtml.match(
+            /\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/
+          )?.[1];
+          if (backupUID && backupUID !== "0" && /^\d+$/.test(String(backupUID)) && parseInt(String(backupUID), 10) > 0) {
+            logger_default(
+              `DB backup session valid, USER_ID=${backupUID} \u2014 using backup`,
+              "info"
+            );
+            return backupProcessed;
+          }
+          logger_default(
+            "DB backup session expired/invalid \u2014 restoring supplied appState",
+            "warn"
+          );
+        } catch (backupErr) {
+          logger_default(
+            `DB backup session test failed \u2014 restoring supplied appState: ${errMsg(backupErr)}`,
+            "warn"
+          );
+        }
+        if (suppliedAppState && suppliedAppState.length) {
+          await setJarCookies(jar2, suppliedAppState);
+        } else if (Cookie) {
+          let cookiePairs = [];
+          if (typeof Cookie === "string") {
+            cookiePairs = normalizeCookieHeaderString2(Cookie);
+          } else if (Array.isArray(Cookie)) {
+            cookiePairs = Cookie.map(String).filter(Boolean);
+          } else if (Cookie && typeof Cookie === "object") {
+            cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
+          }
+          if (cookiePairs.length) {
+            setJarFromPairs(jar2, cookiePairs, domain);
+          }
+        }
+      }
+      if (appState || Cookie) {
+        const initial = await get2(
+          "https://www.facebook.com/",
+          jar2,
+          null,
+          globalOptions
+        ).then(saveCookies(jar2));
         return await ctx.bypassAutomation(initial, jar2) || initial;
       }
       logger_default("AppState expired \u2014 proceeding to email/password login", "warn");

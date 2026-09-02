@@ -719,14 +719,103 @@ function loginHelper(
           return resp;
         }
       };
-      if (appState || Cookie) {
-        const initial = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
-        return (await ctx.bypassAutomation(initial, jar)) || initial;
-      }
-      const hydrated = await hydrateJarFromDB(null);
+      // BACKUP-FIRST SESSION RECOVERY
+      // If an appState was supplied, keep a copy so we can restore it
+      // if the DB backup is missing or expired.
+      const suppliedAppState = Array.isArray(appState)
+        ? appState.map((c: Loose) => ({ ...c }))
+        : null;
+
+      // Prefer the DB backup for the same account when we know its UID.
+      // This avoids using a random "latest backup" when possible.
+      const backupUserID =
+        userIDFromAppState &&
+        userIDFromAppState !== "0" &&
+        /^\d+$/.test(String(userIDFromAppState)) &&
+        parseInt(String(userIDFromAppState), 10) > 0
+          ? String(userIDFromAppState)
+          : null;
+
+      const hydrated = await hydrateJarFromDB(backupUserID);
+
       if (hydrated) {
-        logger("AppState backup live — proceeding to login", "info");
-        const initial = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+        logger(
+          `AppState backup found${backupUserID ? ` for USER_ID=${backupUserID}` : ""} — testing backup session first`,
+          "info"
+        );
+
+        try {
+          const backupInitial = await get(
+            "https://www.facebook.com/",
+            jar,
+            null,
+            globalOptions
+          ).then(saveCookies(jar));
+
+          const backupProcessed =
+            (await ctx.bypassAutomation(backupInitial, jar)) || backupInitial;
+
+          const backupHtml =
+            backupProcessed && backupProcessed.data
+              ? String(backupProcessed.data)
+              : "";
+
+          const backupUID =
+            backupHtml.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] ||
+            backupHtml.match(
+              /\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/
+            )?.[1];
+
+          if (
+            backupUID &&
+            backupUID !== "0" &&
+            /^\d+$/.test(String(backupUID)) &&
+            parseInt(String(backupUID), 10) > 0
+          ) {
+            logger(
+              `DB backup session valid, USER_ID=${backupUID} — using backup`,
+              "info"
+            );
+            return backupProcessed;
+          }
+
+          logger(
+            "DB backup session expired/invalid — restoring supplied appState",
+            "warn"
+          );
+        } catch (backupErr) {
+          logger(
+            `DB backup session test failed — restoring supplied appState: ${errMsg(backupErr)}`,
+            "warn"
+          );
+        }
+
+        // Backup was not usable. Restore the original supplied appState
+        // before continuing through the normal login/recovery path.
+        if (suppliedAppState && suppliedAppState.length) {
+          await setJarCookies(jar, suppliedAppState);
+        } else if (Cookie) {
+          let cookiePairs: string[] = [];
+          if (typeof Cookie === "string") {
+            cookiePairs = normalizeCookieHeaderString(Cookie);
+          } else if (Array.isArray(Cookie)) {
+            cookiePairs = Cookie.map(String).filter(Boolean);
+          } else if (Cookie && typeof Cookie === "object") {
+            cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
+          }
+          if (cookiePairs.length) {
+            setJarFromPairs(jar, cookiePairs, domain);
+          }
+        }
+      }
+
+      if (appState || Cookie) {
+        const initial = await get(
+          "https://www.facebook.com/",
+          jar,
+          null,
+          globalOptions
+        ).then(saveCookies(jar));
         return (await ctx.bypassAutomation(initial, jar)) || initial;
       }
       logger("AppState expired — proceeding to email/password login", "warn");
