@@ -5301,7 +5301,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.4",
+      version: "1.1.5",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
