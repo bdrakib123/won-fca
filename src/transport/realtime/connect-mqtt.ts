@@ -144,6 +144,7 @@ function createListenMqtt(deps: Loose) {
         return;
       }
       const msg = String(err && err.message ? err.message : err || "");
+
       if ((ctx._ending || ctx._cycling) && /No subscription existed|client disconnecting/i.test(msg)) {
         logger(`mqtt expected during shutdown: ${msg}`, "info");
         return;
