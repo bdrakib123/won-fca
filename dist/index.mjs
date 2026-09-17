@@ -5277,7 +5277,7 @@ var init_config2 = __esm({
         timeoutMs: 1e4
       },
       mqtt: { enabled: true, reconnectInterval: 3600 },
-      autoLogin: true,
+      autoLogin: false,
       apiServer: "https://minhdong.site",
       apiKey: "",
       credentials: { email: "", password: "", twofactor: "" },
@@ -5301,7 +5301,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.7",
+      version: "1.1.8",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -5397,185 +5397,6 @@ var init_package = __esm({
         registry: "https://registry.npmjs.org/"
       }
     };
-  }
-});
-
-// src/core/update-check.ts
-import https from "https";
-import { execFile } from "child_process";
-function compareVersionPart(left, right) {
-  const leftNumber = Number(left);
-  const rightNumber = Number(right);
-  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-    if (leftNumber === rightNumber) {
-      return 0;
-    }
-    return leftNumber > rightNumber ? 1 : -1;
-  }
-  return left.localeCompare(right);
-}
-function compareSemver(left, right) {
-  const leftParts = left.replace(/^v/i, "").split("-");
-  const rightParts = right.replace(/^v/i, "").split("-");
-  const leftCore = leftParts[0].split(".");
-  const rightCore = rightParts[0].split(".");
-  const length = Math.max(leftCore.length, rightCore.length);
-  for (let index = 0; index < length; index++) {
-    const result = compareVersionPart(leftCore[index] || "0", rightCore[index] || "0");
-    if (result !== 0) {
-      return result;
-    }
-  }
-  if (leftParts.length === 1 && rightParts.length === 1) {
-    return 0;
-  }
-  if (leftParts.length === 1) {
-    return 1;
-  }
-  if (rightParts.length === 1) {
-    return -1;
-  }
-  return compareVersionPart(leftParts.slice(1).join("-"), rightParts.slice(1).join("-"));
-}
-function normalizeRegistryUrl(value) {
-  return value.replace(/\/+$/, "");
-}
-function readUpdateConfig(input) {
-  if (input && "checkUpdate" in input) {
-    return input.checkUpdate;
-  }
-  const fallback = {
-    enabled: true,
-    install: false,
-    notifyIfCurrent: false,
-    packageName: package_default.name,
-    registryUrl: package_default.publishConfig?.registry || "https://registry.npmjs.org",
-    timeoutMs: 1e4
-  };
-  return { ...fallback, ...input || {} };
-}
-function fetchLatestVersion(config2) {
-  const url2 = `${normalizeRegistryUrl(config2.registryUrl)}/${encodeURIComponent(
-    config2.packageName
-  )}/latest`;
-  return new Promise((resolve, reject) => {
-    const request = https.get(
-      url2,
-      {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": `${config2.packageName}-update-check`
-        },
-        timeout: config2.timeoutMs
-      },
-      (response) => {
-        let body = "";
-        response.on("data", (chunk) => {
-          body += chunk;
-        });
-        response.on("end", () => {
-          try {
-            const payload = JSON.parse(body);
-            const version = payload?.version;
-            if (!version || typeof version !== "string") {
-              reject(new Error("Invalid version payload from registry"));
-              return;
-            }
-            resolve(version);
-          } catch (error) {
-            reject(error);
-          }
-        });
-      }
-    );
-    request.on("timeout", () => {
-      request.destroy(new Error("Update check timed out"));
-    });
-    request.on("error", reject);
-  });
-}
-function installLatestPackage(config2, latestVersion) {
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  const dependency = `${config2.packageName}@${latestVersion}`;
-  return new Promise((resolve, reject) => {
-    execFile(npmCommand, ["i", dependency], { cwd: process.cwd() }, (error, _stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr || error.message));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-async function checkForPackageUpdate(input, logger) {
-  const config2 = readUpdateConfig(input);
-  if (!config2.enabled) {
-    return null;
-  }
-  if (inflightCheck) {
-    return inflightCheck;
-  }
-  inflightCheck = (async () => {
-    const currentVersion = package_default.version;
-    const latestVersion = await fetchLatestVersion(config2);
-    const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
-    if (!updateAvailable) {
-      if (config2.notifyIfCurrent) {
-        logger?.(`You're already on the latest version (${currentVersion})`, "info");
-      }
-      return {
-        packageName: config2.packageName,
-        currentVersion,
-        latestVersion,
-        updateAvailable: false,
-        installed: false
-      };
-    }
-    logger?.(
-      `Update available for ${config2.packageName}: ${currentVersion} -> ${latestVersion}`,
-      "warn"
-    );
-    if (!config2.install) {
-      return {
-        packageName: config2.packageName,
-        currentVersion,
-        latestVersion,
-        updateAvailable: true,
-        installed: false
-      };
-    }
-    logger?.(`Installing ${config2.packageName}@${latestVersion}`, "info");
-    await installLatestPackage(config2, latestVersion);
-    logger?.(`Installed ${config2.packageName}@${latestVersion}. Restart to apply.`, "info");
-    return {
-      packageName: config2.packageName,
-      currentVersion,
-      latestVersion,
-      updateAvailable: true,
-      installed: true
-    };
-  })().finally(() => {
-    inflightCheck = null;
-  });
-  return inflightCheck;
-}
-async function runConfiguredUpdateCheck(config2, logger) {
-  try {
-    return await checkForPackageUpdate(config2, logger);
-  } catch (error) {
-    logger?.(
-      `Cannot check for updates: ${error && error.message ? error.message : String(error)}`,
-      "warn"
-    );
-    return null;
-  }
-}
-var inflightCheck;
-var init_update_check = __esm({
-  "src/core/update-check.ts"() {
-    "use strict";
-    init_package();
-    inflightCheck = null;
   }
 });
 
@@ -13588,143 +13409,6 @@ var require_parse_delta = __commonJS({
 });
 
 // src/transport/realtime/get-seq-id.ts
-async function tryAutoLogin(logger, config2, ctx, _defaultFuncs) {
-  const email = config2.credentials?.email || config2.email;
-  const password = config2.credentials?.password || config2.password;
-  const twofactor = config2.credentials?.twofactor || config2.twofactor || null;
-  if (config2.autoLogin === false || !email || !password) {
-    return null;
-  }
-  logger("getSeqID: attempting auto re-login via API...", "warn");
-  try {
-    const result = await tokensViaAPI(
-      email,
-      password,
-      twofactor,
-      config2.apiServer || null
-    );
-    if (result && result.status) {
-      let cookiePairs = [];
-      if (typeof result.cookies === "string") {
-        cookiePairs = normalizeCookieHeaderString(result.cookies);
-      } else if (Array.isArray(result.cookies)) {
-        cookiePairs = result.cookies.map((c) => {
-          if (typeof c === "string") return c;
-          if (c && typeof c === "object") return `${c.key || c.name}=${c.value}`;
-          return null;
-        }).filter((x) => x != null);
-      }
-      if (cookiePairs.length === 0 && result.cookie) {
-        if (typeof result.cookie === "string") {
-          cookiePairs = normalizeCookieHeaderString(result.cookie);
-        } else if (Array.isArray(result.cookie)) {
-          cookiePairs = result.cookie.map((c) => {
-            if (typeof c === "string") return c;
-            if (c && typeof c === "object") return `${c.key || c.name}=${c.value}`;
-            return null;
-          }).filter((x) => x != null);
-        }
-      }
-      if (cookiePairs.length > 0 || result.uid) {
-        logger(`getSeqID: auto re-login successful! UID: ${result.uid}, Cookies: ${cookiePairs.length}`, "info");
-        if (ctx.jar && cookiePairs.length > 0) {
-          const expires = new Date(Date.now() + 31536e6).toUTCString();
-          for (const kv of cookiePairs) {
-            const cookieStr = `${kv}; expires=${expires}; domain=.facebook.com; path=/;`;
-            try {
-              if (typeof ctx.jar.setCookieSync === "function") {
-                ctx.jar.setCookieSync(cookieStr, "https://www.facebook.com");
-              } else if (typeof ctx.jar.setCookie === "function") {
-                await ctx.jar.setCookie(cookieStr, "https://www.facebook.com");
-              }
-            } catch (err) {
-              logger(`getSeqID: Failed to set cookie ${kv.substring(0, 50)}: ${err && err.message ? err.message : String(err)}`, "warn");
-            }
-          }
-          logger(`getSeqID: applied ${cookiePairs.length} API cookies to jar`, "info");
-        }
-        logger("getSeqID: refreshing web session after API login...", "info");
-        try {
-          const expires = new Date(Date.now() + 31536e6).toUTCString();
-          for (const kv of cookiePairs) {
-            const cookieStr = `${kv}; expires=${expires}; domain=.facebook.com; path=/;`;
-            try {
-              if (typeof jar?.setCookieSync === "function") {
-                jar.setCookieSync(cookieStr, "https://www.facebook.com");
-              } else if (typeof jar?.setCookie === "function") {
-                await jar.setCookie(cookieStr, "https://www.facebook.com");
-              }
-            } catch (err) {
-              logger(
-                `getSeqID: Failed to set cookie in global jar ${kv.substring(0, 50)}: ${err && err.message ? err.message : String(err)}`,
-                "warn"
-              );
-            }
-          }
-          let webResponse = null;
-          let htmlContent = "";
-          const htmlUID = (body) => {
-            const s = typeof body === "string" ? body : String(body ?? "");
-            return s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s.match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
-          };
-          const isValidUID = (uid) => uid && uid !== "0" && /^\d+$/.test(uid) && parseInt(uid, 10) > 0;
-          const urlsToTry = ["https://m.facebook.com/", "https://www.facebook.com/"];
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const urlToUse = attempt === 0 ? urlsToTry[0] : urlsToTry[attempt % urlsToTry.length];
-              logger(`getSeqID: Refreshing ${urlToUse} (attempt ${attempt + 1}/3)...`, "info");
-              webResponse = await get(urlToUse, ctx.jar, null, ctx.globalOptions, ctx);
-              if (webResponse && webResponse.data) {
-                await saveCookies(ctx.jar)(webResponse);
-                htmlContent = typeof webResponse.data === "string" ? webResponse.data : String(webResponse.data || "");
-                const htmlUserID = htmlUID(htmlContent);
-                if (isValidUID(htmlUserID)) {
-                  logger(`getSeqID: Found valid USER_ID in HTML from ${urlToUse}: ${htmlUserID}`, "info");
-                  break;
-                } else if (attempt < 2) {
-                  logger(`getSeqID: No valid USER_ID in HTML from ${urlToUse} (attempt ${attempt + 1}/3), retrying...`, "warn");
-                  await new Promise((resolve) => setTimeout(resolve, 1e3 * (attempt + 1)));
-                }
-              }
-            } catch (refreshErr) {
-              logger(`getSeqID: Error refreshing session (attempt ${attempt + 1}/3): ${refreshErr && refreshErr.message ? refreshErr.message : String(refreshErr)}`, "warn");
-              if (attempt < 2) {
-                await new Promise((resolve) => setTimeout(resolve, 1e3 * (attempt + 1)));
-              }
-            }
-          }
-          if (webResponse && webResponse.data) {
-            const updatedCookies = await ctx.jar.getCookies("https://www.facebook.com");
-            logger(`getSeqID: refreshed session, now have ${updatedCookies.length} web cookies`, "info");
-            const htmlUserID = htmlUID(htmlContent);
-            if (!isValidUID(htmlUserID)) {
-              logger("getSeqID: WARNING - HTML does not show valid USER_ID after refresh. Session may not be fully established.", "warn");
-            }
-            if (ctx) {
-              ctx.loggedIn = true;
-              if (isValidUID(htmlUserID)) {
-                ctx.userID = htmlUserID;
-                logger(`getSeqID: Updated ctx.userID from HTML: ${htmlUserID}`, "info");
-              } else if (result.uid && isValidUID(result.uid)) {
-                ctx.userID = result.uid;
-                logger(`getSeqID: Updated ctx.userID from API: ${result.uid}`, "info");
-              }
-            }
-          } else {
-            logger("getSeqID: Failed to refresh web session after API login", "error");
-          }
-        } catch (refreshErr) {
-          logger(`getSeqID: web session refresh failed - ${refreshErr && refreshErr.message ? refreshErr.message : String(refreshErr)}`, "warn");
-        }
-        return { ...result, cookies: cookiePairs };
-      }
-    }
-    logger(`getSeqID: auto re-login failed - ${result && result.message ? result.message : "Loose error"}`, "error");
-  } catch (loginErr) {
-    logger(`getSeqID: auto re-login error - ${loginErr && loginErr.message ? loginErr.message : String(loginErr)}`, "error");
-  }
-  return null;
-}
 function createGetSeqID(deps) {
   const { listenMqtt: listenMqtt2, logger, emitAuth } = deps;
   return function getSeqID(defaultFuncs, api, ctx, globalCallback, form, retryCount = 0) {
@@ -13772,14 +13456,10 @@ function createGetSeqID(deps) {
           }
           return getSeqID(defaultFuncs, api, ctx, globalCallback, form, retryCount + 1);
         }
-        logger("getSeqID: all retries failed, attempting auto re-login...", "warn");
-        const { config: config2 } = loadConfig();
-        const loginResult = await tryAutoLogin(logger, config2, ctx, defaultFuncs);
-        if (loginResult) {
-          logger("getSeqID: retrying with new session...", "info");
-          await new Promise((resolve) => setTimeout(resolve, 3e3));
-          return getSeqID(defaultFuncs, api, ctx, globalCallback, form, 0);
-        }
+        logger(
+          `getSeqID: authentication retries exhausted; handing recovery to TESSA: ${msg}`,
+          "error"
+        );
         if (/blocked/i.test(msg)) {
           return emitAuth(ctx, api, globalCallback, "login_blocked", msg);
         }
@@ -13796,8 +13476,6 @@ var import_format17, getType13, get_seq_id_default;
 var init_get_seq_id = __esm({
   "src/transport/realtime/get-seq-id.ts"() {
     "use strict";
-    init_auth();
-    init_config2();
     init_client2();
     import_format17 = __toESM(require_format());
     init_request();
@@ -15963,10 +15641,10 @@ function parseRegion(html) {
 async function loginViaAPI(email, password, twoFactor = null, apiBaseUrl = null, apiKey = null) {
   return authCore.loginViaAPI(email, password, twoFactor, apiBaseUrl, apiKey);
 }
-async function tokensViaAPI2(email, password, twoFactor = null, apiBaseUrl = null) {
+async function tokensViaAPI(email, password, twoFactor = null, apiBaseUrl = null) {
   return authCore.tokensViaAPI(email, password, twoFactor ?? null, apiBaseUrl ?? null);
 }
-function normalizeCookieHeaderString2(s) {
+function normalizeCookieHeaderString(s) {
   return authCore.normalizeCookieHeaderString(s);
 }
 function setJarFromPairs(j, pairs, domain) {
@@ -16148,7 +15826,7 @@ async function setJarCookies(j, appstate) {
   await Promise.all(tasks);
 }
 async function tokens(username, password, twofactor = null) {
-  return tokensViaAPI2(username, password, twofactor);
+  return tokensViaAPI(username, password, twofactor);
 }
 async function hydrateJarFromDB(userID) {
   try {
@@ -16162,7 +15840,7 @@ async function hydrateJarFromDB(userID) {
       app = await getLatestBackupAny("appstate");
     }
     if (ck) {
-      const pairs = normalizeCookieHeaderString2(ck);
+      const pairs = normalizeCookieHeaderString(ck);
       if (pairs.length) {
         setJarFromPairs(jar2, pairs, ".facebook.com");
         return true;
@@ -16237,6 +15915,9 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
   if (config.autoLogin === false || String(config.autoLogin) === "false") {
     throw new Error("AppState expired \u2014 Auto-login is disabled");
   }
+  if (hadAppStateInput) {
+    throw new Error("AppState session invalid \u2014 API auto-login skipped");
+  }
   const u = config.credentials?.email || config.email;
   const p = config.credentials?.password || config.password;
   const tf = config.credentials?.twofactor || config.twofactor || null;
@@ -16252,7 +15933,7 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
   logger_default(`tryAutoLoginIfNeeded: API login successful! UID: ${r.uid}`, "info");
   let cookiePairs = [];
   if (typeof r.cookies === "string") {
-    cookiePairs = normalizeCookieHeaderString2(r.cookies);
+    cookiePairs = normalizeCookieHeaderString(r.cookies);
   } else if (Array.isArray(r.cookies)) {
     cookiePairs = r.cookies.map((c) => {
       if (typeof c === "string") {
@@ -16266,7 +15947,7 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
   }
   if (cookiePairs.length === 0 && r.cookie) {
     if (typeof r.cookie === "string") {
-      cookiePairs = normalizeCookieHeaderString2(r.cookie);
+      cookiePairs = normalizeCookieHeaderString(r.cookie);
     } else if (Array.isArray(r.cookie)) {
       cookiePairs = r.cookie.map((c) => {
         if (typeof c === "string") return c;
@@ -16434,7 +16115,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         }
         if (Cookie) {
           let cookiePairs = [];
-          if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString2(Cookie);
+          if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
           else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
           else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
           if (cookiePairs.length) setJarFromPairs(jar2, cookiePairs, domain);
@@ -16542,7 +16223,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         } else if (Cookie) {
           let cookiePairs = [];
           if (typeof Cookie === "string") {
-            cookiePairs = normalizeCookieHeaderString2(Cookie);
+            cookiePairs = normalizeCookieHeaderString(Cookie);
           } else if (Array.isArray(Cookie)) {
             cookiePairs = Cookie.map(String).filter(Boolean);
           } else if (Cookie && typeof Cookie === "object") {
@@ -16884,10 +16565,10 @@ var init_login_helper_impl = __esm({
     uniqueIndexEnsured = false;
     exported = Object.assign(loginHelper, {
       loginHelper,
-      tokensViaAPI: tokensViaAPI2,
+      tokensViaAPI,
       loginViaAPI,
       tokens,
-      normalizeCookieHeaderString: normalizeCookieHeaderString2,
+      normalizeCookieHeaderString,
       setJarFromPairs
     });
     login_helper_impl_default = exported;
@@ -16905,6 +16586,235 @@ var require_login_helper = __commonJS({
 });
 
 // src/core/auth.ts
+init_logger();
+var import_format19 = __toESM(require_format());
+init_state();
+init_request2();
+init_options2();
+init_config2();
+
+// src/core/update-check.ts
+init_package();
+import https from "https";
+import { execFile } from "child_process";
+function compareVersionPart(left, right) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    if (leftNumber === rightNumber) {
+      return 0;
+    }
+    return leftNumber > rightNumber ? 1 : -1;
+  }
+  return left.localeCompare(right);
+}
+function compareSemver(left, right) {
+  const leftParts = left.replace(/^v/i, "").split("-");
+  const rightParts = right.replace(/^v/i, "").split("-");
+  const leftCore = leftParts[0].split(".");
+  const rightCore = rightParts[0].split(".");
+  const length = Math.max(leftCore.length, rightCore.length);
+  for (let index = 0; index < length; index++) {
+    const result = compareVersionPart(leftCore[index] || "0", rightCore[index] || "0");
+    if (result !== 0) {
+      return result;
+    }
+  }
+  if (leftParts.length === 1 && rightParts.length === 1) {
+    return 0;
+  }
+  if (leftParts.length === 1) {
+    return 1;
+  }
+  if (rightParts.length === 1) {
+    return -1;
+  }
+  return compareVersionPart(leftParts.slice(1).join("-"), rightParts.slice(1).join("-"));
+}
+function normalizeRegistryUrl(value) {
+  return value.replace(/\/+$/, "");
+}
+function readUpdateConfig(input) {
+  if (input && "checkUpdate" in input) {
+    return input.checkUpdate;
+  }
+  const fallback = {
+    enabled: true,
+    install: false,
+    notifyIfCurrent: false,
+    packageName: package_default.name,
+    registryUrl: package_default.publishConfig?.registry || "https://registry.npmjs.org",
+    timeoutMs: 1e4
+  };
+  return { ...fallback, ...input || {} };
+}
+function fetchLatestVersion(config2) {
+  const url2 = `${normalizeRegistryUrl(config2.registryUrl)}/${encodeURIComponent(
+    config2.packageName
+  )}/latest`;
+  return new Promise((resolve, reject) => {
+    const request = https.get(
+      url2,
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": `${config2.packageName}-update-check`
+        },
+        timeout: config2.timeoutMs
+      },
+      (response) => {
+        let body = "";
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.on("end", () => {
+          try {
+            const payload = JSON.parse(body);
+            const version = payload?.version;
+            if (!version || typeof version !== "string") {
+              reject(new Error("Invalid version payload from registry"));
+              return;
+            }
+            resolve(version);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.on("timeout", () => {
+      request.destroy(new Error("Update check timed out"));
+    });
+    request.on("error", reject);
+  });
+}
+function installLatestPackage(config2, latestVersion) {
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const dependency = `${config2.packageName}@${latestVersion}`;
+  return new Promise((resolve, reject) => {
+    execFile(npmCommand, ["i", dependency], { cwd: process.cwd() }, (error, _stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr || error.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+var inflightCheck = null;
+async function checkForPackageUpdate(input, logger) {
+  const config2 = readUpdateConfig(input);
+  if (!config2.enabled) {
+    return null;
+  }
+  if (inflightCheck) {
+    return inflightCheck;
+  }
+  inflightCheck = (async () => {
+    const currentVersion = package_default.version;
+    const latestVersion = await fetchLatestVersion(config2);
+    const updateAvailable = compareSemver(latestVersion, currentVersion) > 0;
+    if (!updateAvailable) {
+      if (config2.notifyIfCurrent) {
+        logger?.(`You're already on the latest version (${currentVersion})`, "info");
+      }
+      return {
+        packageName: config2.packageName,
+        currentVersion,
+        latestVersion,
+        updateAvailable: false,
+        installed: false
+      };
+    }
+    logger?.(
+      `Update available for ${config2.packageName}: ${currentVersion} -> ${latestVersion}`,
+      "warn"
+    );
+    if (!config2.install) {
+      return {
+        packageName: config2.packageName,
+        currentVersion,
+        latestVersion,
+        updateAvailable: true,
+        installed: false
+      };
+    }
+    logger?.(`Installing ${config2.packageName}@${latestVersion}`, "info");
+    await installLatestPackage(config2, latestVersion);
+    logger?.(`Installed ${config2.packageName}@${latestVersion}. Restart to apply.`, "info");
+    return {
+      packageName: config2.packageName,
+      currentVersion,
+      latestVersion,
+      updateAvailable: true,
+      installed: true
+    };
+  })().finally(() => {
+    inflightCheck = null;
+  });
+  return inflightCheck;
+}
+async function runConfiguredUpdateCheck(config2, logger) {
+  try {
+    return await checkForPackageUpdate(config2, logger);
+  } catch (error) {
+    logger?.(
+      `Cannot check for updates: ${error && error.message ? error.message : String(error)}`,
+      "warn"
+    );
+    return null;
+  }
+}
+
+// src/core/auth.ts
+var import_login_helper = __toESM(require_login_helper());
+var { getType: getType14 } = import_format19.default;
+var g2 = global;
+var initialConfig = loadConfig().config;
+g2.fca = g2.fca || {};
+g2.fca.config = initialConfig;
+if (!g2.fca._errorHandlersInstalled) {
+  g2.fca._errorHandlersInstalled = true;
+  process.on("unhandledRejection", (reason) => {
+    try {
+      if (reason && typeof reason === "object") {
+        const errorCode = reason.code || reason.cause?.code;
+        const errorMessage = reason.message || String(reason);
+        if (errorMessage.includes("No Sequelize instance passed")) {
+          return;
+        }
+        if (errorCode === "UND_ERR_CONNECT_TIMEOUT" || errorCode === "ETIMEDOUT" || errorMessage.includes("Connect Timeout") || errorMessage.includes("fetch failed")) {
+          logger_default(`Network timeout error caught (non-fatal): ${errorMessage}`, "warn");
+          return;
+        }
+        if (errorCode === "ECONNREFUSED" || errorCode === "ENOTFOUND" || errorCode === "ECONNRESET" || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
+          logger_default(`Network connection error caught (non-fatal): ${errorMessage}`, "warn");
+          return;
+        }
+      }
+      logger_default(
+        `Unhandled promise rejection (non-fatal): ${reason && reason.message ? reason.message : String(reason)}`,
+        "error"
+      );
+    } catch {
+    }
+  });
+  process.on("uncaughtException", (error) => {
+    try {
+      const errorMessage = error.message || String(error);
+      const errorCode = error.code;
+      if (errorMessage.includes("No Sequelize instance passed")) {
+        return;
+      }
+      if (errorCode === "UND_ERR_CONNECT_TIMEOUT" || errorCode === "ETIMEDOUT" || errorMessage.includes("Connect Timeout") || errorMessage.includes("fetch failed")) {
+        logger_default(`Uncaught network timeout error (non-fatal): ${errorMessage}`, "warn");
+        return;
+      }
+      logger_default(`Uncaught exception (attempting to continue): ${errorMessage}`, "error");
+    } catch {
+    }
+  });
+}
 function appStateToCookieString(appState) {
   if (!Array.isArray(appState)) return "";
   return appState.map((c) => {
@@ -16920,6 +16830,19 @@ function appStateToFbid(appState) {
   const iUser = appState.find((c) => c?.key === "i_user" || c?.name === "i_user");
   return String(cUser && cUser.value || iUser && iUser.value || "");
 }
+var DEFAULT_LOGIN_OPTIONS = {
+  selfListen: false,
+  selfListenEvent: false,
+  listenEvents: false,
+  listenTyping: false,
+  updatePresence: false,
+  forceLogin: false,
+  autoMarkRead: false,
+  autoReconnect: true,
+  online: true,
+  emitReady: false,
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+};
 async function loginAsync(credentials, customOptions = {}) {
   const { config: config2 } = loadConfig();
   g2.fca = g2.fca || {};
@@ -16996,101 +16919,23 @@ function loginLegacy(credentials, options, callback) {
   }
   return p;
 }
-var import_format19, import_login_helper, getType14, g2, initialConfig, DEFAULT_LOGIN_OPTIONS, tokensViaAPI, loginViaAPI2, normalizeCookieHeaderString, setJarFromPairs2;
-var init_auth = __esm({
-  "src/core/auth.ts"() {
-    "use strict";
-    init_logger();
-    import_format19 = __toESM(require_format());
-    init_state();
-    init_request2();
-    init_options2();
-    init_config2();
-    init_update_check();
-    import_login_helper = __toESM(require_login_helper());
-    ({ getType: getType14 } = import_format19.default);
-    g2 = global;
-    initialConfig = loadConfig().config;
-    g2.fca = g2.fca || {};
-    g2.fca.config = initialConfig;
-    if (!g2.fca._errorHandlersInstalled) {
-      g2.fca._errorHandlersInstalled = true;
-      process.on("unhandledRejection", (reason) => {
-        try {
-          if (reason && typeof reason === "object") {
-            const errorCode = reason.code || reason.cause?.code;
-            const errorMessage = reason.message || String(reason);
-            if (errorMessage.includes("No Sequelize instance passed")) {
-              return;
-            }
-            if (errorCode === "UND_ERR_CONNECT_TIMEOUT" || errorCode === "ETIMEDOUT" || errorMessage.includes("Connect Timeout") || errorMessage.includes("fetch failed")) {
-              logger_default(`Network timeout error caught (non-fatal): ${errorMessage}`, "warn");
-              return;
-            }
-            if (errorCode === "ECONNREFUSED" || errorCode === "ENOTFOUND" || errorCode === "ECONNRESET" || errorMessage.includes("ECONNREFUSED") || errorMessage.includes("ENOTFOUND")) {
-              logger_default(`Network connection error caught (non-fatal): ${errorMessage}`, "warn");
-              return;
-            }
-          }
-          logger_default(
-            `Unhandled promise rejection (non-fatal): ${reason && reason.message ? reason.message : String(reason)}`,
-            "error"
-          );
-        } catch {
-        }
-      });
-      process.on("uncaughtException", (error) => {
-        try {
-          const errorMessage = error.message || String(error);
-          const errorCode = error.code;
-          if (errorMessage.includes("No Sequelize instance passed")) {
-            return;
-          }
-          if (errorCode === "UND_ERR_CONNECT_TIMEOUT" || errorCode === "ETIMEDOUT" || errorMessage.includes("Connect Timeout") || errorMessage.includes("fetch failed")) {
-            logger_default(`Uncaught network timeout error (non-fatal): ${errorMessage}`, "warn");
-            return;
-          }
-          logger_default(`Uncaught exception (attempting to continue): ${errorMessage}`, "error");
-        } catch {
-        }
-      });
-    }
-    DEFAULT_LOGIN_OPTIONS = {
-      selfListen: false,
-      selfListenEvent: false,
-      listenEvents: false,
-      listenTyping: false,
-      updatePresence: false,
-      forceLogin: false,
-      autoMarkRead: false,
-      autoReconnect: true,
-      online: true,
-      emitReady: false,
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-    };
-    tokensViaAPI = (email, password, twoFactor, apiBaseUrl) => import_login_helper.default.tokensViaAPI(email, password, twoFactor, apiBaseUrl);
-    loginViaAPI2 = (email, password, twoFactor, apiBaseUrl, apiKey) => import_login_helper.default.loginViaAPI(email, password, twoFactor, apiBaseUrl, apiKey);
-    normalizeCookieHeaderString = (cookieHeader) => import_login_helper.default.normalizeCookieHeaderString(cookieHeader);
-    setJarFromPairs2 = (jar3, pairs, domain) => import_login_helper.default.setJarFromPairs(jar3, pairs, domain);
-  }
-});
+var tokensViaAPI2 = (email, password, twoFactor, apiBaseUrl) => import_login_helper.default.tokensViaAPI(email, password, twoFactor, apiBaseUrl);
+var loginViaAPI2 = (email, password, twoFactor, apiBaseUrl, apiKey) => import_login_helper.default.loginViaAPI(email, password, twoFactor, apiBaseUrl, apiKey);
+var normalizeCookieHeaderString2 = (cookieHeader) => import_login_helper.default.normalizeCookieHeaderString(cookieHeader);
+var setJarFromPairs2 = (jar3, pairs, domain) => import_login_helper.default.setJarFromPairs(jar3, pairs, domain);
 
 // src/index.ts
-init_auth();
-init_auth();
 init_state();
 init_request2();
 init_mqtt();
 init_auth_helpers();
 init_config2();
 init_thread_info_realtime_sync();
-init_update_check();
 init_create_client();
 
 // src/app/messenger-bot.ts
-init_auth();
-init_create_client();
 import { EventEmitter as EventEmitter3 } from "events";
+init_create_client();
 
 // src/app/messenger-context.ts
 var MessengerContext = class {
@@ -17452,11 +17297,11 @@ export {
   loginAsync,
   loginLegacy,
   loginViaAPI2 as loginViaAPI,
-  normalizeCookieHeaderString,
+  normalizeCookieHeaderString2 as normalizeCookieHeaderString,
   resolveConfig,
   runConfiguredUpdateCheck,
   setJarFromPairs2 as setJarFromPairs,
-  tokensViaAPI,
+  tokensViaAPI2 as tokensViaAPI,
   writeConfigTemplate
 };
 /*! Bundled license information:

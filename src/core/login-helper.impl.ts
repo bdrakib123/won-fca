@@ -401,6 +401,15 @@ async function tryAutoLoginIfNeeded(
     throw new Error("AppState expired — Auto-login is disabled");
   }
 
+  /*
+   * When TESSA explicitly supplied appState/Cookie,
+   * never fall back to email/password/API login.
+   * Credential authentication is owned by TESSA.
+   */
+  if (hadAppStateInput) {
+    throw new Error("AppState session invalid — API auto-login skipped");
+  }
+
   // Try API login
   const u = config.credentials?.email || config.email;
   const p = config.credentials?.password || config.password;

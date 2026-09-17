@@ -3,7 +3,6 @@
  * Handles retries and auto re-login via fca-config.json when session expires.
  */
 import { tokensViaAPI, normalizeCookieHeaderString } from "../../core/auth";
-import { loadConfig } from "../../core/config";
 import { parseAndCheckLogin, saveCookies } from "../../utils/client";
 import formatMod from "../../utils/format";
 import { get, jar as globalJar } from "../../utils/request";
@@ -19,175 +18,6 @@ interface GetSeqDeps {
 }
 
 // Try to auto-login using API and refresh web session.
-async function tryAutoLogin(
-  logger: Logger,
-  config: Record<string, Loose>,
-  ctx: Loose,
-  _defaultFuncs: Loose
-) {
-  const email = config.credentials?.email || config.email;
-  const password = config.credentials?.password || config.password;
-  const twofactor = config.credentials?.twofactor || config.twofactor || null;
-
-  if (config.autoLogin === false || !email || !password) {
-    return null;
-  }
-
-  logger("getSeqID: attempting auto re-login via API...", "warn");
-
-  try {
-    const result = await tokensViaAPI(
-      email,
-      password,
-      twofactor,
-      config.apiServer || null
-    );
-
-    if (result && result.status) {
-      let cookiePairs: string[] = [];
-
-      if (typeof result.cookies === "string") {
-        cookiePairs = normalizeCookieHeaderString(result.cookies);
-      } else if (Array.isArray(result.cookies)) {
-        cookiePairs = result.cookies
-          .map((c: Loose) => {
-            if (typeof c === "string") return c;
-            if (c && typeof c === "object") return `${c.key || c.name}=${c.value}`;
-            return null;
-          })
-          .filter((x): x is string => x != null);
-      }
-
-      if (cookiePairs.length === 0 && result.cookie) {
-        if (typeof result.cookie === "string") {
-          cookiePairs = normalizeCookieHeaderString(result.cookie);
-        } else if (Array.isArray(result.cookie)) {
-          cookiePairs = result.cookie
-            .map((c: Loose) => {
-              if (typeof c === "string") return c;
-              if (c && typeof c === "object") return `${c.key || c.name}=${c.value}`;
-              return null;
-            })
-            .filter((x): x is string => x != null);
-        }
-      }
-
-      if (cookiePairs.length > 0 || result.uid) {
-        logger(`getSeqID: auto re-login successful! UID: ${result.uid}, Cookies: ${cookiePairs.length}`, "info");
-
-        if (ctx.jar && cookiePairs.length > 0) {
-          const expires = new Date(Date.now() + 31536e6).toUTCString();
-          for (const kv of cookiePairs) {
-            const cookieStr = `${kv}; expires=${expires}; domain=.facebook.com; path=/;`;
-            try {
-              if (typeof ctx.jar.setCookieSync === "function") {
-                ctx.jar.setCookieSync(cookieStr, "https://www.facebook.com");
-              } else if (typeof ctx.jar.setCookie === "function") {
-                await ctx.jar.setCookie(cookieStr, "https://www.facebook.com");
-              }
-            } catch (err: Loose) {
-              logger(`getSeqID: Failed to set cookie ${kv.substring(0, 50)}: ${err && err.message ? err.message : String(err)}`, "warn");
-            }
-          }
-          logger(`getSeqID: applied ${cookiePairs.length} API cookies to jar`, "info");
-        }
-
-        logger("getSeqID: refreshing web session after API login...", "info");
-        try {
-          const expires = new Date(Date.now() + 31536e6).toUTCString();
-          for (const kv of cookiePairs) {
-            const cookieStr = `${kv}; expires=${expires}; domain=.facebook.com; path=/;`;
-            try {
-              if (typeof globalJar?.setCookieSync === "function") {
-                globalJar.setCookieSync(cookieStr, "https://www.facebook.com");
-              } else if (typeof globalJar?.setCookie === "function") {
-                await globalJar.setCookie(cookieStr, "https://www.facebook.com");
-              }
-            } catch (err: Loose) {
-              logger(
-                `getSeqID: Failed to set cookie in global jar ${kv.substring(0, 50)}: ${err && err.message ? err.message : String(err)}`,
-                "warn"
-              );
-            }
-          }
-
-          let webResponse: Loose = null;
-          let htmlContent = "";
-          const htmlUID = (body: Loose) => {
-            const s = typeof body === "string" ? body : String(body ?? "");
-            return (
-              s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] ||
-              s.match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1]
-            );
-          };
-          const isValidUID = (uid: Loose) => uid && uid !== "0" && /^\d+$/.test(uid) && parseInt(uid, 10) > 0;
-          const urlsToTry = ["https://m.facebook.com/", "https://www.facebook.com/"];
-
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const urlToUse = attempt === 0 ? urlsToTry[0] : urlsToTry[attempt % urlsToTry.length];
-              logger(`getSeqID: Refreshing ${urlToUse} (attempt ${attempt + 1}/3)...`, "info");
-
-              webResponse = await get(urlToUse, ctx.jar, null, ctx.globalOptions, ctx);
-              if (webResponse && webResponse.data) {
-                await saveCookies(ctx.jar)(webResponse);
-                htmlContent = typeof webResponse.data === "string" ? webResponse.data : String(webResponse.data || "");
-
-                const htmlUserID = htmlUID(htmlContent);
-                if (isValidUID(htmlUserID)) {
-                  logger(`getSeqID: Found valid USER_ID in HTML from ${urlToUse}: ${htmlUserID}`, "info");
-                  break;
-                } else if (attempt < 2) {
-                  logger(`getSeqID: No valid USER_ID in HTML from ${urlToUse} (attempt ${attempt + 1}/3), retrying...`, "warn");
-                  await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
-                }
-              }
-            } catch (refreshErr: Loose) {
-              logger(`getSeqID: Error refreshing session (attempt ${attempt + 1}/3): ${refreshErr && refreshErr.message ? refreshErr.message : String(refreshErr)}`, "warn");
-              if (attempt < 2) {
-                await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
-              }
-            }
-          }
-
-          if (webResponse && webResponse.data) {
-            const updatedCookies = await ctx.jar.getCookies("https://www.facebook.com");
-            logger(`getSeqID: refreshed session, now have ${updatedCookies.length} web cookies`, "info");
-
-            const htmlUserID = htmlUID(htmlContent);
-            if (!isValidUID(htmlUserID)) {
-              logger("getSeqID: WARNING - HTML does not show valid USER_ID after refresh. Session may not be fully established.", "warn");
-            }
-
-            if (ctx) {
-              ctx.loggedIn = true;
-              if (isValidUID(htmlUserID)) {
-                ctx.userID = htmlUserID;
-                logger(`getSeqID: Updated ctx.userID from HTML: ${htmlUserID}`, "info");
-              } else if (result.uid && isValidUID(result.uid)) {
-                ctx.userID = result.uid;
-                logger(`getSeqID: Updated ctx.userID from API: ${result.uid}`, "info");
-              }
-            }
-          } else {
-            logger("getSeqID: Failed to refresh web session after API login", "error");
-          }
-        } catch (refreshErr: Loose) {
-          logger(`getSeqID: web session refresh failed - ${refreshErr && refreshErr.message ? refreshErr.message : String(refreshErr)}`, "warn");
-        }
-
-        return { ...result, cookies: cookiePairs };
-      }
-    }
-
-    logger(`getSeqID: auto re-login failed - ${result && result.message ? result.message : "Loose error"}`, "error");
-  } catch (loginErr: Loose) {
-    logger(`getSeqID: auto re-login error - ${loginErr && loginErr.message ? loginErr.message : String(loginErr)}`, "error");
-  }
-
-  return null;
-}
-
 function createGetSeqID(deps: GetSeqDeps) {
   const { listenMqtt, logger, emitAuth } = deps;
 
@@ -255,15 +85,18 @@ function createGetSeqID(deps: GetSeqDeps) {
             return getSeqID(defaultFuncs, api, ctx, globalCallback, form, retryCount + 1);
           }
 
-          logger("getSeqID: all retries failed, attempting auto re-login...", "warn");
-          const { config } = loadConfig();
-          const loginResult = await tryAutoLogin(logger, config, ctx, defaultFuncs);
-
-          if (loginResult) {
-            logger("getSeqID: retrying with new session...", "info");
-            await new Promise((resolve) => setTimeout(resolve, 3000));
-            return getSeqID(defaultFuncs, api, ctx, globalCallback, form, 0);
-          }
+          /*
+           * IMPORTANT:
+           * MQTT must never perform its own email/password/API
+           * re-login after authentication retries are exhausted.
+           *
+           * TESSA owns authentication recovery.
+           * WonFCA only reports the authentication failure.
+           */
+          logger(
+            `getSeqID: authentication retries exhausted; handing recovery to TESSA: ${msg}`,
+            "error"
+          );
 
           if (/blocked/i.test(msg)) {
             return emitAuth(ctx, api, globalCallback, "login_blocked", msg);

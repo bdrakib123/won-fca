@@ -60,7 +60,7 @@ export const defaultConfig: FcaConfig = {
     timeoutMs: 10000
   },
   mqtt: { enabled: true, reconnectInterval: 3600 },
-  autoLogin: true,
+  autoLogin: false,
   apiServer: "https://minhdong.site",
   apiKey: "",
   credentials: { email: "", password: "", twofactor: "" },
