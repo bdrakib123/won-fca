@@ -1,6 +1,6 @@
 /**
  * Fetches MQTT sync sequence ID from GraphQL and starts listenMqtt.
- * Handles retries and auto re-login via fca-config.json when session expires.
+ * Handles MQTT sequence retries and hands authentication recovery back to TESSA.
  */
 import { tokensViaAPI, normalizeCookieHeaderString } from "../../core/auth";
 import { parseAndCheckLogin, saveCookies } from "../../utils/client";

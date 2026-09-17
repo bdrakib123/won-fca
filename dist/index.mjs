@@ -5301,7 +5301,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.8",
+      version: "1.1.9",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -15864,169 +15864,109 @@ async function hydrateJarFromDB(userID) {
   }
 }
 async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef, hadAppStateInput = false) {
-  const isValidUID = (uid) => Boolean(uid && uid !== "0" && /^\d+$/.test(String(uid)) && parseInt(String(uid), 10) > 0);
+  const isValidUID = (uid) => Boolean(
+    uid && uid !== "0" && /^\d+$/.test(String(uid)) && parseInt(String(uid), 10) > 0
+  );
   const getUID = (cs) => cs.find((c) => c.key === "i_user")?.value || cs.find((c) => c.key === "c_user")?.value || cs.find((c) => c.name === "i_user")?.value || cs.find((c) => c.name === "c_user")?.value;
   const htmlUID = (body) => {
     const s = typeof body === "string" ? body : String(body ?? "");
-    return s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s.match(/\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/)?.[1];
+    return s.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || s.match(
+      /\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/
+    )?.[1];
   };
   let userID = getUID(currentCookies);
   if (!isValidUID(userID)) {
     userID = htmlUID(currentHtml);
   }
   if (isValidUID(userID)) {
-    return { html: currentHtml, cookies: currentCookies, userID };
+    return {
+      html: currentHtml,
+      cookies: currentCookies,
+      userID
+    };
   }
-  logger_default("tryAutoLoginIfNeeded: No valid userID found, attempting recovery...", "warn");
+  logger_default(
+    "tryAutoLoginIfNeeded: No valid userID found; attempting session recovery only.",
+    "warn"
+  );
   if (hadAppStateInput) {
-    const isCheckpoint = currentHtml.includes("/checkpoint/block/?next");
+    const isCheckpoint = String(currentHtml || "").includes("/checkpoint/block/?next");
     if (!isCheckpoint) {
       try {
-        const refreshedCookies = await Promise.resolve(jar2.getCookies("https://www.facebook.com"));
+        const refreshedCookies = await Promise.resolve(
+          jar2.getCookies("https://www.facebook.com")
+        );
         userID = getUID(refreshedCookies);
         if (isValidUID(userID)) {
-          return { html: currentHtml, cookies: refreshedCookies, userID };
+          logger_default(
+            `tryAutoLoginIfNeeded: supplied session refreshed, USER_ID=${userID}`,
+            "info"
+          );
+          return {
+            html: currentHtml,
+            cookies: refreshedCookies,
+            userID
+          };
         }
-      } catch {
+      } catch (refreshErr) {
+        logger_default(
+          `tryAutoLoginIfNeeded: supplied session refresh failed - ${errMsg(refreshErr)}`,
+          "warn"
+        );
       }
     }
   }
-  const hydrated = await hydrateJarFromDB(null);
-  if (hydrated) {
-    logger_default("tryAutoLoginIfNeeded: Trying backup from DB...", "info");
-    try {
-      const initial = await get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
+  try {
+    const hydrated = await hydrateJarFromDB(null);
+    if (hydrated) {
+      logger_default(
+        "tryAutoLoginIfNeeded: Trying existing DB backup session...",
+        "info"
+      );
+      const initial = await get2(
+        "https://www.facebook.com/",
+        jar2,
+        null,
+        globalOptions
+      ).then(saveCookies(jar2));
       const resB = await ctxRef.bypassAutomation(initial, jar2) || initial;
       const htmlB = resB && resB.data ? resB.data : "";
       if (!htmlB.includes("/checkpoint/block/?next")) {
         const htmlUserID = htmlUID(htmlB);
         if (isValidUID(htmlUserID)) {
-          const cookiesB = await Promise.resolve(jar2.getCookies("https://www.facebook.com"));
-          logger_default(`tryAutoLoginIfNeeded: DB backup session valid, USER_ID=${htmlUserID}`, "info");
-          return { html: htmlB, cookies: cookiesB, userID: htmlUserID };
-        } else {
-          logger_default(`tryAutoLoginIfNeeded: DB backup session dead (HTML USER_ID=${htmlUserID || "empty"}), will try API login...`, "warn");
+          const cookiesB = await Promise.resolve(
+            jar2.getCookies("https://www.facebook.com")
+          );
+          logger_default(
+            `tryAutoLoginIfNeeded: DB backup session valid, USER_ID=${htmlUserID}`,
+            "info"
+          );
+          return {
+            html: htmlB,
+            cookies: cookiesB,
+            userID: htmlUserID
+          };
         }
+        logger_default(
+          `tryAutoLoginIfNeeded: DB backup session invalid (HTML USER_ID=${htmlUserID || "empty"}).`,
+          "warn"
+        );
       }
-    } catch (dbErr) {
-      logger_default(`tryAutoLoginIfNeeded: DB backup failed - ${errMsg(dbErr)}`, "warn");
     }
-  }
-  if (config.autoLogin === false || String(config.autoLogin) === "false") {
-    throw new Error("AppState expired \u2014 Auto-login is disabled");
+  } catch (dbErr) {
+    logger_default(
+      `tryAutoLoginIfNeeded: DB backup recovery failed - ${errMsg(dbErr)}`,
+      "warn"
+    );
   }
   if (hadAppStateInput) {
-    throw new Error("AppState session invalid \u2014 API auto-login skipped");
+    throw new Error(
+      "AppState session invalid \u2014 credential recovery must be handled by TESSA"
+    );
   }
-  const u = config.credentials?.email || config.email;
-  const p = config.credentials?.password || config.password;
-  const tf = config.credentials?.twofactor || config.twofactor || null;
-  if (!u || !p) {
-    logger_default("tryAutoLoginIfNeeded: No credentials configured for auto-login!", "error");
-    throw new Error("Missing credentials for auto-login (email/password not configured in fca-config.json)");
-  }
-  logger_default(`tryAutoLoginIfNeeded: Attempting API login for ${u.slice(0, 3)}***...`, "info");
-  const r = await tokens(u, p, tf);
-  if (!r || !r.status) {
-    throw new Error(r && r.message ? r.message : "API Login failed");
-  }
-  logger_default(`tryAutoLoginIfNeeded: API login successful! UID: ${r.uid}`, "info");
-  let cookiePairs = [];
-  if (typeof r.cookies === "string") {
-    cookiePairs = normalizeCookieHeaderString(r.cookies);
-  } else if (Array.isArray(r.cookies)) {
-    cookiePairs = r.cookies.map((c) => {
-      if (typeof c === "string") {
-        return c;
-      }
-      if (c && typeof c === "object") {
-        return `${c.key || c.name}=${c.value}`;
-      }
-      return null;
-    }).filter((x) => x != null);
-  }
-  if (cookiePairs.length === 0 && r.cookie) {
-    if (typeof r.cookie === "string") {
-      cookiePairs = normalizeCookieHeaderString(r.cookie);
-    } else if (Array.isArray(r.cookie)) {
-      cookiePairs = r.cookie.map((c) => {
-        if (typeof c === "string") return c;
-        if (c && typeof c === "object") return `${c.key || c.name}=${c.value}`;
-        return null;
-      }).filter((x) => x != null);
-    }
-  }
-  if (cookiePairs.length === 0) {
-    logger_default("tryAutoLoginIfNeeded: No cookies found in API response", "warn");
-    throw new Error("API login returned no cookies");
-  } else {
-    logger_default(`tryAutoLoginIfNeeded: Parsed ${cookiePairs.length} cookies from API response`, "info");
-    setJarFromPairs(jar2, cookiePairs, ".facebook.com");
-  }
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  let html2 = "";
-  let res2 = null;
-  let retryCount = 0;
-  const maxRetries = 3;
-  const urlsToTry = ["https://m.facebook.com/", "https://www.facebook.com/"];
-  while (retryCount < maxRetries) {
-    try {
-      const urlToUse = retryCount === 0 ? urlsToTry[0] : urlsToTry[retryCount % urlsToTry.length];
-      logger_default(`tryAutoLoginIfNeeded: Refreshing ${urlToUse} (attempt ${retryCount + 1}/${maxRetries})...`, "info");
-      const initial2 = await get2(urlToUse, jar2, null, globalOptions).then(saveCookies(jar2));
-      res2 = await ctxRef.bypassAutomation(initial2, jar2) || initial2;
-      html2 = res2 && res2.data ? res2.data : "";
-      if (html2.includes("/checkpoint/block/?next")) {
-        throw new Error("Checkpoint after API login");
-      }
-      const htmlUserID = htmlUID(html2);
-      if (isValidUID(htmlUserID)) {
-        logger_default(`tryAutoLoginIfNeeded: Found valid USER_ID in HTML from ${urlToUse}: ${htmlUserID}`, "info");
-        break;
-      }
-      if (retryCount < maxRetries - 1) {
-        logger_default(`tryAutoLoginIfNeeded: No valid USER_ID in HTML from ${urlToUse} (attempt ${retryCount + 1}/${maxRetries}), retrying...`, "warn");
-        await new Promise((resolve) => setTimeout(resolve, 1e3 * (retryCount + 1)));
-        retryCount++;
-      } else {
-        logger_default("tryAutoLoginIfNeeded: No valid USER_ID found in HTML after retries", "warn");
-        break;
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes("Checkpoint")) {
-        throw err;
-      }
-      if (retryCount < maxRetries - 1) {
-        logger_default(`tryAutoLoginIfNeeded: Error refreshing page (attempt ${retryCount + 1}/${maxRetries}): ${errMsg(err)}`, "warn");
-        await new Promise((resolve) => setTimeout(resolve, 1e3 * (retryCount + 1)));
-        retryCount++;
-      } else {
-        throw err;
-      }
-    }
-  }
-  const cookies2 = await Promise.resolve(jar2.getCookies("https://www.facebook.com"));
-  const uid2 = getUID(cookies2);
-  const htmlUserID2 = htmlUID(html2);
-  let finalUID = null;
-  if (isValidUID(htmlUserID2)) {
-    finalUID = htmlUserID2;
-    logger_default(`tryAutoLoginIfNeeded: Using USER_ID from HTML: ${finalUID}`, "info");
-  } else if (isValidUID(uid2)) {
-    finalUID = uid2;
-    logger_default(`tryAutoLoginIfNeeded: Using USER_ID from cookies: ${finalUID}`, "info");
-  } else if (isValidUID(r.uid)) {
-    finalUID = r.uid;
-    logger_default(`tryAutoLoginIfNeeded: Using USER_ID from API response: ${finalUID}`, "info");
-  }
-  if (!isValidUID(finalUID)) {
-    logger_default(`tryAutoLoginIfNeeded: HTML check - USER_ID from HTML: ${htmlUserID2 || "none"}, from cookies: ${uid2 || "none"}, from API: ${r.uid || "none"}`, "error");
-    throw new Error("Login failed - could not get valid userID after API login. HTML may indicate session is not established.");
-  }
-  if (!isValidUID(htmlUserID2)) {
-    logger_default("tryAutoLoginIfNeeded: WARNING - HTML does not show valid USER_ID, but proceeding with cookie-based UID", "warn");
-  }
-  return { html: html2, cookies: cookies2, userID: finalUID };
+  throw new Error(
+    "Facebook session invalid \u2014 credential recovery must be handled by TESSA"
+  );
 }
 function makeLogin(j, email, password, globalOptions) {
   return async function() {
@@ -16428,7 +16368,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           logger_default(`ACCOUNT: ${userID}`, "info");
         }
       } catch (userDataErr) {
-        if (userDataErr instanceof Error && userDataErr.message.includes("Auto-login failed")) {
+        if (userDataErr instanceof Error && (userDataErr.message.includes("credential recovery must be handled by TESSA") || userDataErr.message.includes("Facebook session invalid"))) {
           throw userDataErr;
         }
       }
@@ -16467,22 +16407,6 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         emitter,
         bypassAutomation: ctx.bypassAutomation
       });
-      ctxMain.performAutoLogin = async () => {
-        try {
-          const u = config.credentials?.email || email;
-          const p = config.credentials?.password || password;
-          const tf = config.credentials?.twofactor || null;
-          if (!u || !p) return false;
-          const r = await tokens(u, p, tf);
-          if (!(r && r.status && Array.isArray(r.cookies))) return false;
-          const pairs = r.cookies.map((c) => `${c.key || c.name}=${c.value}`);
-          setJarFromPairs(jar2, pairs, ".facebook.com");
-          await get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
-          return true;
-        } catch {
-          return false;
-        }
-      };
       const api = createApiFacade({
         globalOptions,
         jar: jar2,
