@@ -1046,6 +1046,7 @@ interface LogoutCommandDeps {
         post: (url: string, jar: Loose, form?: Record<string, Loose>) => Promise<Loose>;
     };
     ctx: Loose;
+    onLogout?: () => Promise<void> | void;
     logInfo?: (scope: string, message: string) => void;
     logError?: (scope: string, error: Loose) => void;
 }

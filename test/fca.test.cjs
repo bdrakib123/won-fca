@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const { EventEmitter } = require("node:events");
 const fs = require("fs");
 const path = require("path");
 
@@ -467,6 +468,61 @@ test("attachClientFacade exposes grouped namespaces on legacy api object", () =>
   assert.strictEqual(typeof api.account.getCurrentUserID, "function");
   assert.strictEqual(typeof api.realtime.listen, "function");
   assert.strictEqual(typeof api.http.get, "function");
+});
+
+test("MessengerBot start is idempotent and stop releases session resources", async () => {
+  let listenCount = 0;
+  let stopCount = 0;
+  let remoteCloseCount = 0;
+  let schedulerDestroyCount = 0;
+  let cleaned = false;
+
+  const api = {
+    listenMqtt() {
+      listenCount += 1;
+      const emitter = new EventEmitter();
+      emitter.stopListeningAsync = async () => {
+        stopCount += 1;
+      };
+      return emitter;
+    },
+    remote: {
+      close() {
+        remoteCloseCount += 1;
+      }
+    },
+    scheduler: {
+      destroy() {
+        schedulerDestroyCount += 1;
+      }
+    },
+    _cleanupSessionResources() {
+      if (cleaned) return;
+      cleaned = true;
+      remoteCloseCount += 1;
+      schedulerDestroyCount += 1;
+    }
+  };
+
+  const bot = new fca.MessengerBot(
+    { api },
+    {
+      enableComposer: false,
+      commandPrefix: "/",
+      stopOnSignals: false,
+      maxEventListeners: 64
+    }
+  );
+
+  bot.startListening();
+  bot.startListening();
+  await bot.stop();
+  await bot.stop();
+
+  assert.strictEqual(listenCount, 1);
+  assert.strictEqual(stopCount, 1);
+  assert.strictEqual(remoteCloseCount, 1);
+  assert.strictEqual(schedulerDestroyCount, 1);
 });
 
 test("optional live login works when credentials are provided", async () => {

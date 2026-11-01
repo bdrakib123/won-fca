@@ -17,6 +17,7 @@ import { createRequestCore } from "./request";
 import { attachThreadInfoRealtimeSync } from "./thread-info-realtime-sync";
 import { attachThreadUpdater, createApiFacade, createFcaState } from "./state";
 import { DataTypes } from "sequelize";
+import { CookieJar } from "tough-cookie";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -27,7 +28,7 @@ const g = globalThis as Loose;
 const { config } = loadConfig();
 const axiosBase = axios;
 const requestCore = createRequestCore();
-const { get, post, jar, makeDefaults } = requestCore;
+const { get, post, makeDefaults } = requestCore;
 const authCore = createAuthCore({ config, logger, axiosBase });
 const REGION_MAP = authCore.REGION_MAP;
 
@@ -290,7 +291,7 @@ async function tokens(username: string, password: string, twofactor: string | nu
   return tokensViaAPI(username, password, twofactor);
 }
 
-async function hydrateJarFromDB(userID: Loose) {
+async function hydrateJarFromDB(j: Loose, userID: Loose) {
   try {
     let ck = null;
     let app = null;
@@ -304,7 +305,7 @@ async function hydrateJarFromDB(userID: Loose) {
     if (ck) {
       const pairs = normalizeCookieHeaderString(ck);
       if (pairs.length) {
-        setJarFromPairs(jar, pairs, ".facebook.com");
+        setJarFromPairs(j, pairs, ".facebook.com");
         return true;
       }
     }
@@ -315,7 +316,7 @@ async function hydrateJarFromDB(userID: Loose) {
       } catch { }
       if (Array.isArray(parsed)) {
         const pairs = parsed.map(c => [c.name || c.key, c.value].join("="));
-        setJarFromPairs(jar, pairs, ".facebook.com");
+        setJarFromPairs(j, pairs, ".facebook.com");
         return true;
       }
     }
@@ -330,6 +331,7 @@ async function tryAutoLoginIfNeeded(
   currentCookies: Loose,
   globalOptions: Loose,
   ctxRef: Loose,
+  j: Loose,
   hadAppStateInput = false
 ) {
   const isValidUID = (uid: Loose) =>
@@ -403,7 +405,7 @@ async function tryAutoLoginIfNeeded(
     if (!isCheckpoint) {
       try {
         const refreshedCookies = await Promise.resolve(
-          jar.getCookies("https://www.facebook.com")
+          j.getCookies("https://www.facebook.com")
         );
 
         userID = getUID(refreshedCookies);
@@ -433,7 +435,7 @@ async function tryAutoLoginIfNeeded(
   // 2. Existing DB backup session
   // ------------------------------------------------------------
   try {
-    const hydrated = await hydrateJarFromDB(null);
+    const hydrated = await hydrateJarFromDB(j, null);
 
     if (hydrated) {
       logger(
@@ -443,13 +445,13 @@ async function tryAutoLoginIfNeeded(
 
       const initial = await get(
         "https://www.facebook.com/",
-        jar,
+        j,
         null,
         globalOptions
-      ).then(saveCookies(jar));
+      ).then(saveCookies(j));
 
       const resB =
-        (await ctxRef.bypassAutomation(initial, jar)) || initial;
+        (await ctxRef.bypassAutomation(initial, j)) || initial;
 
       const htmlB =
         resB && resB.data
@@ -462,7 +464,7 @@ async function tryAutoLoginIfNeeded(
         if (isValidUID(htmlUserID)) {
           const cookiesB =
             await Promise.resolve(
-              jar.getCookies("https://www.facebook.com")
+              j.getCookies("https://www.facebook.com")
             );
 
           logger(
@@ -534,6 +536,7 @@ function loginHelper(
 ) {
   try {
     const domain = ".facebook.com";
+    const sessionJar = new CookieJar();
     const ui = logger as Loose;
     const loginFlow = { spinner: null as Loose };
     // Helper to extract userID from appState input
@@ -603,7 +606,7 @@ function loginHelper(
 
           // Set cookies into jar with individual domain/path
           if (Array.isArray(appState)) {
-            await setJarCookies(jar, appState);
+            await setJarCookies(sessionJar, appState);
           } else {
             throw new Error("Invalid appState format");
           }
@@ -613,7 +616,7 @@ function loginHelper(
           if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
           else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
           else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
-          if (cookiePairs.length) setJarFromPairs(jar, cookiePairs, domain);
+          if (cookiePairs.length) setJarFromPairs(sessionJar, cookiePairs, domain);
         }
       } catch (e) {
         return callback(e);
@@ -693,7 +696,7 @@ function loginHelper(
           ? String(userIDFromAppState)
           : null;
 
-      const hydrated = await hydrateJarFromDB(backupUserID);
+      const hydrated = await hydrateJarFromDB(sessionJar, backupUserID);
 
       if (hydrated) {
         logger(
@@ -704,13 +707,13 @@ function loginHelper(
         try {
           const backupInitial = await get(
             "https://www.facebook.com/",
-            jar,
+            sessionJar,
             null,
             globalOptions
-          ).then(saveCookies(jar));
+          ).then(saveCookies(sessionJar));
 
           const backupProcessed =
-            (await ctx.bypassAutomation(backupInitial, jar)) || backupInitial;
+            (await ctx.bypassAutomation(backupInitial, sessionJar)) || backupInitial;
 
           const backupHtml =
             backupProcessed && backupProcessed.data
@@ -750,7 +753,7 @@ function loginHelper(
         // Backup was not usable. Restore the original supplied appState
         // before continuing through the normal login/recovery path.
         if (suppliedAppState && suppliedAppState.length) {
-          await setJarCookies(jar, suppliedAppState);
+          await setJarCookies(sessionJar, suppliedAppState);
         } else if (Cookie) {
           let cookiePairs: string[] = [];
           if (typeof Cookie === "string") {
@@ -761,7 +764,7 @@ function loginHelper(
             cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
           }
           if (cookiePairs.length) {
-            setJarFromPairs(jar, cookiePairs, domain);
+            setJarFromPairs(sessionJar, cookiePairs, domain);
           }
         }
       }
@@ -769,18 +772,18 @@ function loginHelper(
       if (appState || Cookie) {
         const initial = await get(
           "https://www.facebook.com/",
-          jar,
+          sessionJar,
           null,
           globalOptions
-        ).then(saveCookies(jar));
-        return (await ctx.bypassAutomation(initial, jar)) || initial;
+        ).then(saveCookies(sessionJar));
+        return (await ctx.bypassAutomation(initial, sessionJar)) || initial;
       }
       logger("AppState expired — proceeding to email/password login", "warn");
-      return get("https://www.facebook.com/", null, null, globalOptions)
-        .then(saveCookies(jar))
-        .then(makeLogin(jar, email, password, globalOptions))
+      return get("https://www.facebook.com/", sessionJar, null, globalOptions)
+        .then(saveCookies(sessionJar))
+        .then(makeLogin(sessionJar, email, password, globalOptions))
         .then(function () {
-          return get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+          return get("https://www.facebook.com/", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
         });
     })()
       .then(async function (res: Loose) {
@@ -828,7 +831,7 @@ function loginHelper(
         if (typeof ui.startSpinner === "function") {
           loginFlow.spinner = await ui.startSpinner("fca: Checking session status...");
         }
-        const processed = (await ctx.bypassAutomation(res, jar)) || res;
+        const processed = (await ctx.bypassAutomation(res, sessionJar)) || res;
         if (typeof ui.persistCheckpointOk === "function") {
           ui.persistCheckpointOk(loginFlow.spinner);
         } else if (loginFlow.spinner && typeof loginFlow.spinner.stopAndPersist === "function") {
@@ -841,7 +844,7 @@ function loginHelper(
           loginFlow.spinner = await ui.startSpinner("fca: Finalizing login...");
         }
         let html = processed && processed.data ? processed.data : "";
-        let cookies = await Promise.resolve(jar.getCookies("https://www.facebook.com"));
+        let cookies = await Promise.resolve(sessionJar.getCookies("https://www.facebook.com"));
         const getUIDFromCookies = (cs: Loose[]) =>
           cs.find((c: Loose) => c.key === "i_user")?.value ||
           cs.find((c: Loose) => c.key === "c_user")?.value ||
@@ -868,7 +871,7 @@ function loginHelper(
         if (!isValidUID(userID)) {
           logger("Invalid userID detected (missing or 0), attempting auto-login...", "warn");
           // Pass hadAppStateInput=true if appState/Cookie was originally provided
-          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
+          const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, sessionJar, !!(appState || Cookie));
           html = retried.html;
           cookies = retried.cookies;
           userID = retried.userID;
@@ -879,7 +882,7 @@ function loginHelper(
             logger("After auto-login, HTML still does not contain valid USER_ID. Session may not be established.", "error");
             // Try one more refresh
             try {
-              const refreshRes = await get("https://www.facebook.com/", jar, null, globalOptions).then(saveCookies(jar));
+              const refreshRes = await get("https://www.facebook.com/", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
               const refreshedHtml = refreshRes && refreshRes.data ? refreshRes.data : "";
               const refreshedHtmlUID = getUIDFromHTML(refreshedHtml);
               if (isValidUID(refreshedHtmlUID)) {
@@ -917,7 +920,7 @@ function loginHelper(
               
               // Try refreshing with m.facebook.com/home.php (mobile home page)
               logger("Trying to activate session via m.facebook.com/home.php...", "info");
-              const activateRes = await get("https://m.facebook.com/home.php", jar, null, globalOptions).then(saveCookies(jar));
+              const activateRes = await get("https://m.facebook.com/home.php", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
               const activateHtml = activateRes && activateRes.data ? activateRes.data : "";
               const activateUID = getUIDFromHTML(activateHtml);
               
@@ -930,7 +933,7 @@ function loginHelper(
                 // Try one more time with www.facebook.com/home.php after delay
                 await new Promise(resolve => setTimeout(resolve, 1500));
                 logger("Trying to activate session via www.facebook.com/home.php...", "info");
-                const activateRes2 = await get("https://www.facebook.com/home.php", jar, null, globalOptions).then(saveCookies(jar));
+                const activateRes2 = await get("https://www.facebook.com/home.php", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
                 const activateHtml2 = activateRes2 && activateRes2.data ? activateRes2.data : "";
                 const activateUID2 = getUIDFromHTML(activateHtml2);
                 
@@ -987,7 +990,7 @@ function loginHelper(
             if (!isValidUID(info.USER_ID)) {
               logger("Facebook response shows invalid USER_ID (0 or empty), session is dead!", "warn");
               // Force trigger auto-login
-              const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
+              const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, sessionJar, !!(appState || Cookie));
               html = retried.html;
               cookies = retried.cookies;
               userID = retried.userID;
@@ -1017,7 +1020,7 @@ function loginHelper(
         const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
         if (tokenMatch) fb_dtsg = tokenMatch[1];
         try {
-          if (userID) await backupAppStateSQL(jar, userID);
+          if (userID) await backupAppStateSQL(sessionJar, userID);
         } catch { }
         Promise.resolve()
           .then(function () {
@@ -1042,7 +1045,7 @@ function loginHelper(
         const emitter = new EventEmitter();
         const ctxMain = createFcaState({
           userID,
-          jar,
+          jar: sessionJar,
           globalOptions,
           lastSeqId: irisSeqID,
           mqttEndpoint,
@@ -1065,7 +1068,7 @@ function loginHelper(
          */
         const api = createApiFacade({
           globalOptions,
-          jar,
+          jar: sessionJar,
           userID,
           emitter,
           setOptions,
@@ -1101,6 +1104,31 @@ function loginHelper(
         ctxMain._fbDtsgRefreshInterval = attachMqttCompatibility(api, {
           logger,
           refreshIntervalMs: 86400000
+        });
+        const cleanupSessionResources = () => {
+          for (const field of ["_userInfoIntervals", "_autoSaveInterval"]) {
+            const intervals = ctxMain[field];
+            if (!Array.isArray(intervals)) continue;
+            intervals.forEach((interval: NodeJS.Timeout) => clearInterval(interval));
+            ctxMain[field] = [];
+          }
+          if (ctxMain._fbDtsgRefreshInterval) {
+            clearInterval(ctxMain._fbDtsgRefreshInterval);
+            ctxMain._fbDtsgRefreshInterval = null;
+          }
+          if (ctxMain._scheduler && typeof ctxMain._scheduler.destroy === "function") {
+            ctxMain._scheduler.destroy();
+            ctxMain._scheduler = undefined;
+          }
+          if (typeof api.remote?.close === "function") {
+            api.remote.close();
+          }
+        };
+        ctxMain._cleanupSessionResources = cleanupSessionResources;
+        Object.defineProperty(api, "_cleanupSessionResources", {
+          configurable: false,
+          enumerable: false,
+          value: cleanupSessionResources
         });
         if (typeof ui.persistLoginSuccess === "function") {
           ui.persistLoginSuccess(loginFlow.spinner);

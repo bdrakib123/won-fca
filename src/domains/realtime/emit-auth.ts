@@ -9,6 +9,8 @@ interface EmitAuthDeps {
 interface EmitAuthContext {
   _autoCycleTimer?: NodeJS.Timeout | null;
   _reconnectTimer?: NodeJS.Timeout | null;
+  _fbDtsgRefreshInterval?: NodeJS.Timeout | null;
+  _cleanupSessionResources?: () => void;
   _ending?: boolean;
   _cycling?: boolean;
   mqttClient?: {
@@ -42,7 +44,7 @@ type GlobalCallback = ((err: AccountInactiveEvent, event: null) => void) | null 
 function createEmitAuth({ logger }: EmitAuthDeps) {
   return function emitAuth(
     ctx: EmitAuthContext,
-    _api: Loose,
+    api: Loose,
     globalCallback: GlobalCallback,
     reason: string,
     detail?: string
@@ -75,6 +77,14 @@ function createEmitAuth({ logger }: EmitAuthDeps) {
       }
     } catch { }
 
+    try {
+      if (typeof api?.remote?.close === "function") {
+        api.remote.close();
+      }
+    } catch (error: Loose) {
+      logger(`remote client cleanup error: ${error && error.message ? error.message : String(error)}`, "warn");
+    }
+
     ctx.mqttClient = undefined;
     ctx.loggedIn = false;
 
@@ -82,6 +92,13 @@ function createEmitAuth({ logger }: EmitAuthDeps) {
       if (ctx._rTimeout) {
         clearTimeout(ctx._rTimeout);
         ctx._rTimeout = null;
+      }
+    } catch { }
+
+    try {
+      if (ctx._fbDtsgRefreshInterval) {
+        clearInterval(ctx._fbDtsgRefreshInterval);
+        ctx._fbDtsgRefreshInterval = null;
       }
     } catch { }
 
@@ -120,6 +137,15 @@ function createEmitAuth({ logger }: EmitAuthDeps) {
       }
     } catch { }
 
+    try {
+      ctx._cleanupSessionResources?.();
+    } catch (cleanupErr: Loose) {
+      logger(
+        `session resource cleanup error: ${cleanupErr && cleanupErr.message ? cleanupErr.message : String(cleanupErr)}`,
+        "warn"
+      );
+    }
+
     const msg = detail || reason;
     logger(`auth change -> ${reason}: ${msg}`, "error");
 
@@ -142,5 +168,3 @@ function createEmitAuth({ logger }: EmitAuthDeps) {
 }
 
 export = createEmitAuth;
-
-

@@ -366,6 +366,14 @@ export function attachLegacyApiSurface(
     logout: {
       defaultFuncs,
       ctx,
+      onLogout: async () => {
+        if (typeof api.stopListeningAsync === "function") {
+          await api.stopListeningAsync();
+        }
+        if (typeof ctx._cleanupSessionResources === "function") {
+          ctx._cleanupSessionResources();
+        }
+      },
       logInfo,
       logError
     },

@@ -245,28 +245,6 @@ export function createRealtimeListener(deps: RealtimeListenerDeps) {
         if (ctx.tasks && ctx.tasks instanceof Map) {
           ctx.tasks.clear();
         }
-        if (ctx._userInfoIntervals && Array.isArray(ctx._userInfoIntervals)) {
-          ctx._userInfoIntervals.forEach((interval: NodeJS.Timeout) => {
-            try {
-              clearInterval(interval);
-            } catch { }
-          });
-          ctx._userInfoIntervals = [];
-        }
-        if (ctx._autoSaveInterval && Array.isArray(ctx._autoSaveInterval)) {
-          ctx._autoSaveInterval.forEach((interval: NodeJS.Timeout) => {
-            try {
-              clearInterval(interval);
-            } catch { }
-          });
-          ctx._autoSaveInterval = [];
-        }
-        if (ctx._scheduler && typeof ctx._scheduler.destroy === "function") {
-          try {
-            ctx._scheduler.destroy();
-          } catch { }
-          ctx._scheduler = undefined;
-        }
         next?.();
       };
 

@@ -52,6 +52,10 @@ export function createRemoteClient(api: Loose, ctx: Loose, cfg: Loose) {
     const socket = ws;
 
     socket.on("open", () => {
+      if (closed) {
+        socket.terminate();
+        return;
+      }
       log("connected", "info");
       const payload = {
         type: "hello",
@@ -66,6 +70,7 @@ export function createRemoteClient(api: Loose, ctx: Loose, cfg: Loose) {
     });
 
     socket.on("message", (data) => {
+      if (closed) return;
       let msg: Loose;
       try {
         msg = JSON.parse(data.toString()) as Loose;
@@ -93,12 +98,14 @@ export function createRemoteClient(api: Loose, ctx: Loose, cfg: Loose) {
     });
 
     socket.on("close", () => {
+      if (closed) return;
       log("disconnected", "warn");
       safeEmit("remoteDisconnected", undefined);
-      if (!closed) scheduleReconnect();
+      scheduleReconnect();
     });
 
     socket.on("error", (err: Error) => {
+      if (closed) return;
       log(`error: ${err && err.message ? err.message : String(err)}`, "warn");
     });
   }
@@ -113,7 +120,9 @@ export function createRemoteClient(api: Loose, ctx: Loose, cfg: Loose) {
         reconnectTimer = null;
       }
       try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws?.readyState === WebSocket.CONNECTING) {
+          ws.terminate();
+        } else if (ws?.readyState === WebSocket.OPEN) {
           ws.close();
         }
       } catch { }

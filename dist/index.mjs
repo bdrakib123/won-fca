@@ -1410,7 +1410,7 @@ function createFcaState(input) {
 function createApiFacade(params) {
   const {
     globalOptions,
-    jar: jar3,
+    jar: jar2,
     userID,
     emitter,
     setOptions: setOptions2,
@@ -1421,10 +1421,10 @@ function createApiFacade(params) {
   return {
     setOptions: setOptions2.bind(null, globalOptions),
     getCookies: function() {
-      return cookieHeaderFromJar2(jar3);
+      return cookieHeaderFromJar2(jar2);
     },
     getAppState: function() {
-      return getAppState2(jar3);
+      return getAppState2(jar2);
     },
     getLatestAppStateFromDB: async function(uid = userID) {
       const data = await getLatestBackup2(uid, "appstate");
@@ -3716,7 +3716,7 @@ var require_cookieJar = __commonJS({
           return constants_1.PrefixSecurityEnum.SILENT;
       }
     }
-    var CookieJar3 = class _CookieJar {
+    var CookieJar4 = class _CookieJar {
       /**
        * Creates a new `CookieJar` instance.
        *
@@ -4371,18 +4371,18 @@ var require_cookieJar = __commonJS({
           const value = readSerializedProperty(property);
           return typeof value === "string" ? value : void 0;
         };
-        const jar3 = new _CookieJar(store, {
+        const jar2 = new _CookieJar(store, {
           rejectPublicSuffixes: readSerializedBoolean("rejectPublicSuffixes"),
           looseMode: readSerializedBoolean("enableLooseMode"),
           allowSpecialUseDomain: readSerializedBoolean("allowSpecialUseDomain"),
           prefixSecurity: getNormalizedPrefixSecurity(readSerializedString("prefixSecurity") ?? "silent")
         });
-        jar3._importCookies(serialized, (err) => {
+        jar2._importCookies(serialized, (err) => {
           if (err) {
             promiseCallback.callback(err);
             return;
           }
-          promiseCallback.callback(null, jar3);
+          promiseCallback.callback(null, jar2);
         });
         return promiseCallback.promise;
       }
@@ -4414,17 +4414,17 @@ var require_cookieJar = __commonJS({
           const value = readSerializedProperty(property);
           return typeof value === "string" ? value : void 0;
         };
-        const jar3 = new _CookieJar(store, {
+        const jar2 = new _CookieJar(store, {
           rejectPublicSuffixes: readSerializedBoolean("rejectPublicSuffixes"),
           looseMode: readSerializedBoolean("enableLooseMode"),
           allowSpecialUseDomain: readSerializedBoolean("allowSpecialUseDomain"),
           prefixSecurity: getNormalizedPrefixSecurity(readSerializedString("prefixSecurity") ?? "silent")
         });
-        if (!jar3.store.synchronous) {
+        if (!jar2.store.synchronous) {
           throw new Error("CookieJar store is not synchronous; use async API instead.");
         }
-        jar3._importCookiesSync(serialized);
-        return jar3;
+        jar2._importCookiesSync(serialized);
+        return jar2;
       }
       /**
        * Alias of {@link CookieJar.deserializeSync}.
@@ -4441,7 +4441,7 @@ var require_cookieJar = __commonJS({
         return _CookieJar.deserializeSync(jsonString, store);
       }
     };
-    exports.CookieJar = CookieJar3;
+    exports.CookieJar = CookieJar4;
   }
 });
 
@@ -5301,7 +5301,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.1.9",
+      version: "1.2.0",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -5319,7 +5319,8 @@ var init_package = __esm({
         "README.md",
         "test/",
         "LICENSE",
-        "fca-config.example.json"
+        "fca-config.example.json",
+        "npm-shrinkwrap.json"
       ],
       scripts: {
         test: "node ./test/fca.test.cjs",
@@ -5382,6 +5383,18 @@ var init_package = __esm({
         sqlite3: "^5.1.7",
         "totp-generator": "^1.0.0",
         ws: "^8.18.1"
+      },
+      overrides: {
+        "follow-redirects": "1.16.2",
+        "ip-address": "10.7.5",
+        "axios-cookiejar-support": {
+          "http-cookie-agent": {
+            undici: "6.29.1"
+          }
+        },
+        cheerio: {
+          undici: "7.30.1"
+        }
       },
       devDependencies: {
         "@types/cli-progress": "^3.11.6",
@@ -5457,7 +5470,7 @@ var init_legacy_promise = __esm({
 });
 
 // src/utils/cookies.ts
-function saveCookies(jar3) {
+function saveCookies(jar2) {
   return (res) => {
     try {
       const setCookie = res?.headers?.["set-cookie"];
@@ -5465,7 +5478,7 @@ function saveCookies(jar3) {
         const url2 = res?.request?.res?.responseUrl || (res?.config?.baseURL ? new URL(res.config.url || "/", res.config.baseURL).toString() : res?.config?.url || "https://www.facebook.com");
         for (const c of setCookie) {
           try {
-            jar3.setCookieSync?.(c, url2);
+            jar2.setCookieSync?.(c, url2);
           } catch {
           }
         }
@@ -5475,12 +5488,12 @@ function saveCookies(jar3) {
     return res;
   };
 }
-function getAppState(jar3) {
-  if (!jar3 || typeof jar3.getCookiesSync !== "function") return [];
+function getAppState(jar2) {
+  if (!jar2 || typeof jar2.getCookiesSync !== "function") return [];
   const urls = ["https://www.facebook.com"];
   const all = urls.flatMap((u) => {
     try {
-      return jar3.getCookiesSync?.(u) || [];
+      return jar2.getCookiesSync?.(u) || [];
     } catch {
       return [];
     }
@@ -5885,7 +5898,7 @@ var init_facebook = __esm({
 
 // src/domains/account/commands/logout.ts
 function createLogoutCommand(deps) {
-  const { defaultFuncs, ctx, logInfo: logInfo2, logError: logError2 } = deps;
+  const { defaultFuncs, ctx, onLogout, logInfo: logInfo2, logError: logError2 } = deps;
   return function logout(callback) {
     const { callback: cb, promise } = createLegacyPromise(callback);
     postWithLoginCheck({
@@ -5915,8 +5928,13 @@ function createLogoutCommand(deps) {
         ctx,
         url: res.headers.location
       });
-    }).then(() => {
+    }).then(async () => {
       ctx.loggedIn = false;
+      try {
+        await onLogout?.();
+      } catch (error) {
+        logError2?.("logout.cleanup", error);
+      }
       logInfo2?.("logout", "Logged out successfully.");
       cb();
     }).catch((error) => {
@@ -6076,8 +6094,8 @@ var init_enable_auto_save_app_state = __esm({
 
 // src/transport/http/graphql.ts
 async function postGraphql(params) {
-  const { defaultFuncs, ctx, form, url: url2 = "https://www.facebook.com/api/graphql/", jar: jar3 = ctx.jar } = params;
-  return defaultFuncs.post(url2, jar3, form).then(parseAndCheckLogin2(ctx, defaultFuncs));
+  const { defaultFuncs, ctx, form, url: url2 = "https://www.facebook.com/api/graphql/", jar: jar2 = ctx.jar } = params;
+  return defaultFuncs.post(url2, jar2, form).then(parseAndCheckLogin2(ctx, defaultFuncs));
 }
 async function postGraphqlBatch(params) {
   const { defaultFuncs, ctx, form, url: url2 = "https://www.facebook.com/api/graphqlbatch/" } = params;
@@ -8168,7 +8186,7 @@ async function singleUpload(params) {
   }
   throw new Error("Attachment upload failed");
 }
-function createHttpClient(ua, jar3) {
+function createHttpClient(ua, jar2) {
   const client2 = wrapper2(
     axios2.create({
       timeout: 6e4,
@@ -8183,14 +8201,14 @@ function createHttpClient(ua, jar3) {
     })
   );
   client2.defaults.withCredentials = true;
-  client2.defaults.jar = jar3;
+  client2.defaults.jar = jar2;
   return client2;
 }
 function createAttachmentUploadTransport(deps) {
   const { ctx, logger } = deps;
   const ua = ctx.options?.userAgent || DEFAULT_UA;
-  const jar3 = ctx.jar instanceof import_tough_cookie2.CookieJar || typeof ctx.jar?.setCookie === "function" ? ctx.jar : new import_tough_cookie2.CookieJar();
-  const http = createHttpClient(ua, jar3);
+  const jar2 = ctx.jar instanceof import_tough_cookie2.CookieJar || typeof ctx.jar?.setCookie === "function" ? ctx.jar : new import_tough_cookie2.CookieJar();
+  const http = createHttpClient(ua, jar2);
   const tokenState = {
     value: null,
     timestamp: 0
@@ -9400,31 +9418,6 @@ function createRealtimeListener(deps) {
         }
         if (ctx.tasks && ctx.tasks instanceof Map) {
           ctx.tasks.clear();
-        }
-        if (ctx._userInfoIntervals && Array.isArray(ctx._userInfoIntervals)) {
-          ctx._userInfoIntervals.forEach((interval) => {
-            try {
-              clearInterval(interval);
-            } catch {
-            }
-          });
-          ctx._userInfoIntervals = [];
-        }
-        if (ctx._autoSaveInterval && Array.isArray(ctx._autoSaveInterval)) {
-          ctx._autoSaveInterval.forEach((interval) => {
-            try {
-              clearInterval(interval);
-            } catch {
-            }
-          });
-          ctx._autoSaveInterval = [];
-        }
-        if (ctx._scheduler && typeof ctx._scheduler.destroy === "function") {
-          try {
-            ctx._scheduler.destroy();
-          } catch {
-          }
-          ctx._scheduler = void 0;
         }
         next?.();
       };
@@ -12906,7 +12899,7 @@ var require_emit_auth = __commonJS({
   "src/domains/realtime/emit-auth.ts"(exports, module) {
     "use strict";
     function createEmitAuth2({ logger }) {
-      return function emitAuth(ctx, _api, globalCallback, reason, detail) {
+      return function emitAuth(ctx, api, globalCallback, reason, detail) {
         try {
           if (ctx._autoCycleTimer) {
             clearInterval(ctx._autoCycleTimer);
@@ -12935,12 +12928,26 @@ var require_emit_auth = __commonJS({
           }
         } catch {
         }
+        try {
+          if (typeof api?.remote?.close === "function") {
+            api.remote.close();
+          }
+        } catch (error) {
+          logger(`remote client cleanup error: ${error && error.message ? error.message : String(error)}`, "warn");
+        }
         ctx.mqttClient = void 0;
         ctx.loggedIn = false;
         try {
           if (ctx._rTimeout) {
             clearTimeout(ctx._rTimeout);
             ctx._rTimeout = null;
+          }
+        } catch {
+        }
+        try {
+          if (ctx._fbDtsgRefreshInterval) {
+            clearInterval(ctx._fbDtsgRefreshInterval);
+            ctx._fbDtsgRefreshInterval = null;
           }
         } catch {
         }
@@ -12980,6 +12987,14 @@ var require_emit_auth = __commonJS({
             ctx._scheduler = void 0;
           }
         } catch {
+        }
+        try {
+          ctx._cleanupSessionResources?.();
+        } catch (cleanupErr) {
+          logger(
+            `session resource cleanup error: ${cleanupErr && cleanupErr.message ? cleanupErr.message : String(cleanupErr)}`,
+            "warn"
+          );
         }
         const msg = detail || reason;
         logger(`auth change -> ${reason}: ${msg}`, "error");
@@ -14445,6 +14460,14 @@ function attachLegacyApiSurface(api, defaultFuncs, ctx, logger = logger_default)
     logout: {
       defaultFuncs,
       ctx,
+      onLogout: async () => {
+        if (typeof api.stopListeningAsync === "function") {
+          await api.stopListeningAsync();
+        }
+        if (typeof ctx._cleanupSessionResources === "function") {
+          ctx._cleanupSessionResources();
+        }
+      },
       logInfo,
       logError
     },
@@ -14916,6 +14939,10 @@ function createRemoteClient(api, ctx, cfg2) {
     }
     const socket = ws;
     socket.on("open", () => {
+      if (closed) {
+        socket.terminate();
+        return;
+      }
       log2("connected", "info");
       const payload = {
         type: "hello",
@@ -14930,6 +14957,7 @@ function createRemoteClient(api, ctx, cfg2) {
       safeEmit("remoteConnected", payload);
     });
     socket.on("message", (data) => {
+      if (closed) return;
       let msg;
       try {
         msg = JSON.parse(data.toString());
@@ -14956,11 +14984,13 @@ function createRemoteClient(api, ctx, cfg2) {
       }
     });
     socket.on("close", () => {
+      if (closed) return;
       log2("disconnected", "warn");
       safeEmit("remoteDisconnected", void 0);
-      if (!closed) scheduleReconnect();
+      scheduleReconnect();
     });
     socket.on("error", (err) => {
+      if (closed) return;
       log2(`error: ${err && err.message ? err.message : String(err)}`, "warn");
     });
   }
@@ -14973,7 +15003,9 @@ function createRemoteClient(api, ctx, cfg2) {
         reconnectTimer = null;
       }
       try {
-        if (ws && ws.readyState === WebSocket2.OPEN) {
+        if (ws?.readyState === WebSocket2.CONNECTING) {
+          ws.terminate();
+        } else if (ws?.readyState === WebSocket2.OPEN) {
           ws.close();
         }
       } catch {
@@ -15828,7 +15860,7 @@ async function setJarCookies(j, appstate) {
 async function tokens(username, password, twofactor = null) {
   return tokensViaAPI(username, password, twofactor);
 }
-async function hydrateJarFromDB(userID) {
+async function hydrateJarFromDB(j, userID) {
   try {
     let ck = null;
     let app = null;
@@ -15842,7 +15874,7 @@ async function hydrateJarFromDB(userID) {
     if (ck) {
       const pairs = normalizeCookieHeaderString(ck);
       if (pairs.length) {
-        setJarFromPairs(jar2, pairs, ".facebook.com");
+        setJarFromPairs(j, pairs, ".facebook.com");
         return true;
       }
     }
@@ -15854,7 +15886,7 @@ async function hydrateJarFromDB(userID) {
       }
       if (Array.isArray(parsed)) {
         const pairs = parsed.map((c) => [c.name || c.key, c.value].join("="));
-        setJarFromPairs(jar2, pairs, ".facebook.com");
+        setJarFromPairs(j, pairs, ".facebook.com");
         return true;
       }
     }
@@ -15863,7 +15895,7 @@ async function hydrateJarFromDB(userID) {
     return false;
   }
 }
-async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef, hadAppStateInput = false) {
+async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, ctxRef, j, hadAppStateInput = false) {
   const isValidUID = (uid) => Boolean(
     uid && uid !== "0" && /^\d+$/.test(String(uid)) && parseInt(String(uid), 10) > 0
   );
@@ -15894,7 +15926,7 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
     if (!isCheckpoint) {
       try {
         const refreshedCookies = await Promise.resolve(
-          jar2.getCookies("https://www.facebook.com")
+          j.getCookies("https://www.facebook.com")
         );
         userID = getUID(refreshedCookies);
         if (isValidUID(userID)) {
@@ -15917,7 +15949,7 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
     }
   }
   try {
-    const hydrated = await hydrateJarFromDB(null);
+    const hydrated = await hydrateJarFromDB(j, null);
     if (hydrated) {
       logger_default(
         "tryAutoLoginIfNeeded: Trying existing DB backup session...",
@@ -15925,17 +15957,17 @@ async function tryAutoLoginIfNeeded(currentHtml, currentCookies, globalOptions, 
       );
       const initial = await get2(
         "https://www.facebook.com/",
-        jar2,
+        j,
         null,
         globalOptions
-      ).then(saveCookies(jar2));
-      const resB = await ctxRef.bypassAutomation(initial, jar2) || initial;
+      ).then(saveCookies(j));
+      const resB = await ctxRef.bypassAutomation(initial, j) || initial;
       const htmlB = resB && resB.data ? resB.data : "";
       if (!htmlB.includes("/checkpoint/block/?next")) {
         const htmlUserID = htmlUID(htmlB);
         if (isValidUID(htmlUserID)) {
           const cookiesB = await Promise.resolve(
-            jar2.getCookies("https://www.facebook.com")
+            j.getCookies("https://www.facebook.com")
           );
           logger_default(
             `tryAutoLoginIfNeeded: DB backup session valid, USER_ID=${htmlUserID}`,
@@ -15987,6 +16019,7 @@ function makeLogin(j, email, password, globalOptions) {
 function loginHelper(appState, Cookie, email, password, globalOptions, callback) {
   try {
     const domain = ".facebook.com";
+    const sessionJar = new import_tough_cookie3.CookieJar();
     const ui = logger_default;
     const loginFlow = { spinner: null };
     const extractUIDFromAppState = (appStateInput) => {
@@ -16048,7 +16081,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             }
           }
           if (Array.isArray(appState)) {
-            await setJarCookies(jar2, appState);
+            await setJarCookies(sessionJar, appState);
           } else {
             throw new Error("Invalid appState format");
           }
@@ -16058,7 +16091,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           if (typeof Cookie === "string") cookiePairs = normalizeCookieHeaderString(Cookie);
           else if (Array.isArray(Cookie)) cookiePairs = Cookie.map(String).filter(Boolean);
           else if (Cookie && typeof Cookie === "object") cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
-          if (cookiePairs.length) setJarFromPairs(jar2, cookiePairs, domain);
+          if (cookiePairs.length) setJarFromPairs(sessionJar, cookiePairs, domain);
         }
       } catch (e) {
         return callback(e);
@@ -16123,7 +16156,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       };
       const suppliedAppState = Array.isArray(appState) ? appState.map((c) => ({ ...c })) : null;
       const backupUserID = userIDFromAppState && userIDFromAppState !== "0" && /^\d+$/.test(String(userIDFromAppState)) && parseInt(String(userIDFromAppState), 10) > 0 ? String(userIDFromAppState) : null;
-      const hydrated = await hydrateJarFromDB(backupUserID);
+      const hydrated = await hydrateJarFromDB(sessionJar, backupUserID);
       if (hydrated) {
         logger_default(
           `AppState backup found${backupUserID ? ` for USER_ID=${backupUserID}` : ""} \u2014 testing backup session first`,
@@ -16132,11 +16165,11 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         try {
           const backupInitial = await get2(
             "https://www.facebook.com/",
-            jar2,
+            sessionJar,
             null,
             globalOptions
-          ).then(saveCookies(jar2));
-          const backupProcessed = await ctx.bypassAutomation(backupInitial, jar2) || backupInitial;
+          ).then(saveCookies(sessionJar));
+          const backupProcessed = await ctx.bypassAutomation(backupInitial, sessionJar) || backupInitial;
           const backupHtml = backupProcessed && backupProcessed.data ? String(backupProcessed.data) : "";
           const backupUID = backupHtml.match(/"USER_ID"\s*:\s*"(\d+)"/)?.[1] || backupHtml.match(
             /\["CurrentUserInitialData",\[\],\{.*?"USER_ID":"(\d+)".*?\},\d+\]/
@@ -16159,7 +16192,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           );
         }
         if (suppliedAppState && suppliedAppState.length) {
-          await setJarCookies(jar2, suppliedAppState);
+          await setJarCookies(sessionJar, suppliedAppState);
         } else if (Cookie) {
           let cookiePairs = [];
           if (typeof Cookie === "string") {
@@ -16170,22 +16203,22 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             cookiePairs = Object.entries(Cookie).map(([k, v]) => `${k}=${v}`);
           }
           if (cookiePairs.length) {
-            setJarFromPairs(jar2, cookiePairs, domain);
+            setJarFromPairs(sessionJar, cookiePairs, domain);
           }
         }
       }
       if (appState || Cookie) {
         const initial = await get2(
           "https://www.facebook.com/",
-          jar2,
+          sessionJar,
           null,
           globalOptions
-        ).then(saveCookies(jar2));
-        return await ctx.bypassAutomation(initial, jar2) || initial;
+        ).then(saveCookies(sessionJar));
+        return await ctx.bypassAutomation(initial, sessionJar) || initial;
       }
       logger_default("AppState expired \u2014 proceeding to email/password login", "warn");
-      return get2("https://www.facebook.com/", null, null, globalOptions).then(saveCookies(jar2)).then(makeLogin(jar2, email, password, globalOptions)).then(function() {
-        return get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
+      return get2("https://www.facebook.com/", sessionJar, null, globalOptions).then(saveCookies(sessionJar)).then(makeLogin(sessionJar, email, password, globalOptions)).then(function() {
+        return get2("https://www.facebook.com/", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
       });
     })().then(async function(res) {
       const ctx = {};
@@ -16232,7 +16265,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       if (typeof ui.startSpinner === "function") {
         loginFlow.spinner = await ui.startSpinner("fca: Checking session status...");
       }
-      const processed = await ctx.bypassAutomation(res, jar2) || res;
+      const processed = await ctx.bypassAutomation(res, sessionJar) || res;
       if (typeof ui.persistCheckpointOk === "function") {
         ui.persistCheckpointOk(loginFlow.spinner);
       } else if (loginFlow.spinner && typeof loginFlow.spinner.stopAndPersist === "function") {
@@ -16245,7 +16278,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         loginFlow.spinner = await ui.startSpinner("fca: Finalizing login...");
       }
       let html = processed && processed.data ? processed.data : "";
-      let cookies = await Promise.resolve(jar2.getCookies("https://www.facebook.com"));
+      let cookies = await Promise.resolve(sessionJar.getCookies("https://www.facebook.com"));
       const getUIDFromCookies = (cs) => cs.find((c) => c.key === "i_user")?.value || cs.find((c) => c.key === "c_user")?.value || cs.find((c) => c.name === "i_user")?.value || cs.find((c) => c.name === "c_user")?.value;
       const getUIDFromHTML = (body) => {
         const s = typeof body === "string" ? body : String(body ?? "");
@@ -16261,7 +16294,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       }
       if (!isValidUID(userID)) {
         logger_default("Invalid userID detected (missing or 0), attempting auto-login...", "warn");
-        const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
+        const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, sessionJar, !!(appState || Cookie));
         html = retried.html;
         cookies = retried.cookies;
         userID = retried.userID;
@@ -16269,7 +16302,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         if (!isValidUID(htmlUserIDAfterLogin)) {
           logger_default("After auto-login, HTML still does not contain valid USER_ID. Session may not be established.", "error");
           try {
-            const refreshRes = await get2("https://www.facebook.com/", jar2, null, globalOptions).then(saveCookies(jar2));
+            const refreshRes = await get2("https://www.facebook.com/", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
             const refreshedHtml = refreshRes && refreshRes.data ? refreshRes.data : "";
             const refreshedHtmlUID = getUIDFromHTML(refreshedHtml);
             if (isValidUID(refreshedHtmlUID)) {
@@ -16298,7 +16331,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           try {
             await new Promise((resolve) => setTimeout(resolve, 1e3));
             logger_default("Trying to activate session via m.facebook.com/home.php...", "info");
-            const activateRes = await get2("https://m.facebook.com/home.php", jar2, null, globalOptions).then(saveCookies(jar2));
+            const activateRes = await get2("https://m.facebook.com/home.php", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
             const activateHtml = activateRes && activateRes.data ? activateRes.data : "";
             const activateUID = getUIDFromHTML(activateHtml);
             if (isValidUID(activateUID)) {
@@ -16309,7 +16342,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
             } else {
               await new Promise((resolve) => setTimeout(resolve, 1500));
               logger_default("Trying to activate session via www.facebook.com/home.php...", "info");
-              const activateRes2 = await get2("https://www.facebook.com/home.php", jar2, null, globalOptions).then(saveCookies(jar2));
+              const activateRes2 = await get2("https://www.facebook.com/home.php", sessionJar, null, globalOptions).then(saveCookies(sessionJar));
               const activateHtml2 = activateRes2 && activateRes2.data ? activateRes2.data : "";
               const activateUID2 = getUIDFromHTML(activateHtml2);
               if (isValidUID(activateUID2)) {
@@ -16356,7 +16389,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
           logger_default(`ACCOUNT: ${info.NAME} (${info.USER_ID})`, "info");
           if (!isValidUID(info.USER_ID)) {
             logger_default("Facebook response shows invalid USER_ID (0 or empty), session is dead!", "warn");
-            const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, !!(appState || Cookie));
+            const retried = await tryAutoLoginIfNeeded(html, cookies, globalOptions, ctx, sessionJar, !!(appState || Cookie));
             html = retried.html;
             cookies = retried.cookies;
             userID = retried.userID;
@@ -16375,7 +16408,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
       if (tokenMatch) fb_dtsg = tokenMatch[1];
       try {
-        if (userID) await backupAppStateSQL(jar2, userID);
+        if (userID) await backupAppStateSQL(sessionJar, userID);
       } catch {
       }
       Promise.resolve().then(function() {
@@ -16396,7 +16429,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       const emitter = new EventEmitter2();
       const ctxMain = createFcaState({
         userID,
-        jar: jar2,
+        jar: sessionJar,
         globalOptions,
         lastSeqId: irisSeqID,
         mqttEndpoint,
@@ -16409,7 +16442,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       });
       const api = createApiFacade({
         globalOptions,
-        jar: jar2,
+        jar: sessionJar,
         userID,
         emitter,
         setOptions,
@@ -16442,6 +16475,31 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
         logger: logger_default,
         refreshIntervalMs: 864e5
       });
+      const cleanupSessionResources = () => {
+        for (const field of ["_userInfoIntervals", "_autoSaveInterval"]) {
+          const intervals = ctxMain[field];
+          if (!Array.isArray(intervals)) continue;
+          intervals.forEach((interval) => clearInterval(interval));
+          ctxMain[field] = [];
+        }
+        if (ctxMain._fbDtsgRefreshInterval) {
+          clearInterval(ctxMain._fbDtsgRefreshInterval);
+          ctxMain._fbDtsgRefreshInterval = null;
+        }
+        if (ctxMain._scheduler && typeof ctxMain._scheduler.destroy === "function") {
+          ctxMain._scheduler.destroy();
+          ctxMain._scheduler = void 0;
+        }
+        if (typeof api.remote?.close === "function") {
+          api.remote.close();
+        }
+      };
+      ctxMain._cleanupSessionResources = cleanupSessionResources;
+      Object.defineProperty(api, "_cleanupSessionResources", {
+        configurable: false,
+        enumerable: false,
+        value: cleanupSessionResources
+      });
       if (typeof ui.persistLoginSuccess === "function") {
         ui.persistLoginSuccess(loginFlow.spinner);
       } else if (loginFlow.spinner && typeof loginFlow.spinner.succeed === "function") {
@@ -16461,7 +16519,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
     callback(e);
   }
 }
-var g, config, axiosBase, requestCore, get2, post2, jar2, makeDefaults2, authCore, REGION_MAP, uniqueIndexEnsured, exported, login_helper_impl_default;
+var import_tough_cookie3, g, config, axiosBase, requestCore, get2, post2, makeDefaults2, authCore, REGION_MAP, uniqueIndexEnsured, exported, login_helper_impl_default;
 var init_login_helper_impl = __esm({
   "src/core/login-helper.impl.ts"() {
     "use strict";
@@ -16479,11 +16537,12 @@ var init_login_helper_impl = __esm({
     init_request2();
     init_thread_info_realtime_sync();
     init_state();
+    import_tough_cookie3 = __toESM(require_cookie3());
     g = globalThis;
     ({ config } = loadConfig());
     axiosBase = axios4;
     requestCore = createRequestCore();
-    ({ get: get2, post: post2, jar: jar2, makeDefaults: makeDefaults2 } = requestCore);
+    ({ get: get2, post: post2, makeDefaults: makeDefaults2 } = requestCore);
     authCore = createAuthCore({ config, logger: logger_default, axiosBase });
     REGION_MAP = authCore.REGION_MAP;
     uniqueIndexEnsured = false;
@@ -16846,7 +16905,7 @@ function loginLegacy(credentials, options, callback) {
 var tokensViaAPI2 = (email, password, twoFactor, apiBaseUrl) => import_login_helper.default.tokensViaAPI(email, password, twoFactor, apiBaseUrl);
 var loginViaAPI2 = (email, password, twoFactor, apiBaseUrl, apiKey) => import_login_helper.default.loginViaAPI(email, password, twoFactor, apiBaseUrl, apiKey);
 var normalizeCookieHeaderString2 = (cookieHeader) => import_login_helper.default.normalizeCookieHeaderString(cookieHeader);
-var setJarFromPairs2 = (jar3, pairs, domain) => import_login_helper.default.setJarFromPairs(jar3, pairs, domain);
+var setJarFromPairs2 = (jar2, pairs, domain) => import_login_helper.default.setJarFromPairs(jar2, pairs, domain);
 
 // src/index.ts
 init_state();
@@ -17101,19 +17160,34 @@ var MessengerBot = class _MessengerBot extends EventEmitter3 {
   }
   async stop() {
     this.detachStopSignals();
-    if (!this._mqtt) {
-      return;
+    try {
+      if (this._mqtt) {
+        const mqtt2 = this._mqtt;
+        const asyncStop = mqtt2.stopListeningAsync;
+        if (typeof asyncStop === "function") {
+          await asyncStop();
+        } else {
+          mqtt2.stopListening?.();
+        }
+        mqtt2.removeAllListeners?.();
+      }
+    } finally {
+      const cleanup = this.api._cleanupSessionResources;
+      if (typeof cleanup === "function") {
+        cleanup();
+      } else {
+        const remote = this.api.remote;
+        if (remote && typeof remote.close === "function") {
+          remote.close();
+        }
+        const scheduler = this.api.scheduler;
+        if (scheduler && typeof scheduler.destroy === "function") {
+          scheduler.destroy();
+        }
+      }
+      this._mqtt = null;
+      this._listening = false;
     }
-    const mqtt2 = this._mqtt;
-    const asyncStop = mqtt2.stopListeningAsync;
-    if (typeof asyncStop === "function") {
-      await asyncStop();
-    } else {
-      mqtt2.stopListening?.();
-    }
-    mqtt2.removeAllListeners?.();
-    this._mqtt = null;
-    this._listening = false;
   }
   enqueueComposerIfNeeded(event) {
     if (!this._enableComposer || this._middlewares.length === 0) {

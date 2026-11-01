@@ -278,19 +278,34 @@ export class MessengerBot extends EventEmitter implements MessengerBotLike {
   async stop(): Promise<void> {
     this.detachStopSignals();
 
-    if (!this._mqtt) {
-      return;
+    try {
+      if (this._mqtt) {
+        const mqtt = this._mqtt;
+        const asyncStop = mqtt.stopListeningAsync;
+        if (typeof asyncStop === "function") {
+          await asyncStop();
+        } else {
+          mqtt.stopListening?.();
+        }
+        mqtt.removeAllListeners?.();
+      }
+    } finally {
+      const cleanup = this.api._cleanupSessionResources;
+      if (typeof cleanup === "function") {
+        cleanup();
+      } else {
+        const remote = this.api.remote;
+        if (remote && typeof remote.close === "function") {
+          remote.close();
+        }
+        const scheduler = this.api.scheduler;
+        if (scheduler && typeof scheduler.destroy === "function") {
+          scheduler.destroy();
+        }
+      }
+      this._mqtt = null;
+      this._listening = false;
     }
-    const mqtt = this._mqtt;
-    const asyncStop = mqtt.stopListeningAsync;
-    if (typeof asyncStop === "function") {
-      await asyncStop();
-    } else {
-      mqtt.stopListening?.();
-    }
-    mqtt.removeAllListeners?.();
-    this._mqtt = null;
-    this._listening = false;
   }
 
   private enqueueComposerIfNeeded(event: MqttEvent): void {

@@ -8,12 +8,13 @@ export interface LogoutCommandDeps {
     post: (url: string, jar: Loose, form?: Record<string, Loose>) => Promise<Loose>;
   };
   ctx: Loose;
+  onLogout?: () => Promise<void> | void;
   logInfo?: (scope: string, message: string) => void;
   logError?: (scope: string, error: Loose) => void;
 }
 
 export function createLogoutCommand(deps: LogoutCommandDeps) {
-  const { defaultFuncs, ctx, logInfo, logError } = deps;
+  const { defaultFuncs, ctx, onLogout, logInfo, logError } = deps;
 
   return function logout(callback?: (err?: Loose, data?: Loose) => void) {
     const { callback: cb, promise } = createLegacyPromise<Loose>(callback);
@@ -49,8 +50,13 @@ export function createLogoutCommand(deps: LogoutCommandDeps) {
           url: res.headers.location
         });
       })
-      .then(() => {
+      .then(async () => {
         ctx.loggedIn = false;
+        try {
+          await onLogout?.();
+        } catch (error) {
+          logError?.("logout.cleanup", error);
+        }
         logInfo?.("logout", "Logged out successfully.");
         cb();
       })
