@@ -4,6 +4,7 @@ import EventEmitter from "node:events";
 import axios from "axios";
 import { attachLegacyApiSurface } from "../app/attach-legacy-api";
 import { attachClientFacade } from "../compat/api-registry";
+import { serializeSqliteWrite } from "../database/helpers";
 import models from "../database/models";
 import logger from "../func/logger";
 import { createRemoteClient } from "../remote/remoteClient";
@@ -101,8 +102,6 @@ function cookieHeaderFromJar(j: Loose) {
   return parts.join("; ");
 }
 
-let uniqueIndexEnsured = false;
-
 function getBackupModel() {
   try {
     if (!models || !models.sequelize || !models.Sequelize) return null;
@@ -133,39 +132,31 @@ function getBackupModel() {
       return null;
     }
   } catch (e) {
-    // Silently handle errors in getBackupModel
+    logger(`Failed to initialize AppStateBackup model: ${errMsg(e)}`, "warn");
     return null;
   }
 }
 
-async function ensureUniqueIndex(sequelize: Loose) {
-  if (uniqueIndexEnsured || !sequelize) return;
-  try {
-    if (typeof sequelize.getQueryInterface !== "function") return;
-    await sequelize.getQueryInterface().addIndex("app_state_backups", ["userID", "type"], { unique: true, name: "app_state_user_type_unique" });
-  } catch { }
-  uniqueIndexEnsured = true;
-}
-
 async function upsertBackup(Model: Loose, userID: Loose, type: string, data: Loose) {
   const where = { userID: String(userID || ""), type };
-  const row = await Model.findOne({ where });
-  if (row) {
-    await row.update({ data });
-    logger(`Overwrote existing ${type} backup for user ${where.userID}`, "sys");
-    return;
-  }
-  await Model.create({ ...where, data });
-  logger(`Created new ${type} backup for user ${where.userID}`, "sys");
+  await serializeSqliteWrite(Model, async () => {
+    const [row, created] = await Model.findOrCreate({
+      where,
+      defaults: { data }
+    });
+    if (!created) {
+      await row.update({ data });
+    }
+  });
+  logger(`Stored ${type} backup for user ${where.userID}`, "sys");
 }
 
 async function backupAppStateSQL(j: Loose, userID: Loose) {
   try {
     const Model = getBackupModel();
-    if (!Model) return;
-    if (!models || !models.sequelize) return;
+    if (!Model) throw new Error("AppStateBackup model unavailable");
+    if (!models || !models.sequelize) throw new Error("SQLite cache unavailable");
     await Model.sync();
-    await ensureUniqueIndex(models.sequelize);
     const appJson = getAppState(j);
     const ck = cookieHeaderFromJar(j);
     await upsertBackup(Model, userID, "appstate", JSON.stringify(appJson));
@@ -179,22 +170,24 @@ async function backupAppStateSQL(j: Loose, userID: Loose) {
 async function getLatestBackup(userID: Loose, type: string) {
   try {
     const Model = getBackupModel();
-    if (!Model) return null;
+    if (!Model) throw new Error("AppStateBackup model unavailable");
     const row = await Model.findOne({ where: { userID: String(userID || ""), type } });
     return row ? ((row as Loose).data as string | null) : null;
-  } catch {
-    return null;
+  } catch (error) {
+    logger(`Failed to read SQLite session backup: ${errMsg(error)}`, "warn");
+    throw error;
   }
 }
 
 async function getLatestBackupAny(type: string) {
   try {
     const Model = getBackupModel();
-    if (!Model) return null;
+    if (!Model) throw new Error("AppStateBackup model unavailable");
     const row = await Model.findOne({ where: { type }, order: [["updatedAt", "DESC"]] });
     return row ? ((row as Loose).data as string | null) : null;
-  } catch {
-    return null;
+  } catch (error) {
+    logger(`Failed to read SQLite session backup: ${errMsg(error)}`, "warn");
+    throw error;
   }
 }
 
@@ -293,6 +286,11 @@ async function tokens(username: string, password: string, twofactor: string | nu
 
 async function hydrateJarFromDB(j: Loose, userID: Loose) {
   try {
+    getBackupModel();
+    if (models && typeof models.syncAll === "function") {
+      await models.syncAll();
+    }
+
     let ck = null;
     let app = null;
     if (userID) {
@@ -321,7 +319,8 @@ async function hydrateJarFromDB(j: Loose, userID: Loose) {
       }
     }
     return false;
-  } catch {
+  } catch (error) {
+    logger(`Failed to hydrate session from SQLite cache: ${errMsg(error)}`, "warn");
     return false;
   }
 }
@@ -1019,28 +1018,21 @@ function loginHelper(
         }
         const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
         if (tokenMatch) fb_dtsg = tokenMatch[1];
+        let cacheReady = false;
         try {
-          if (userID) await backupAppStateSQL(sessionJar, userID);
-        } catch { }
-        Promise.resolve()
-          .then(function () {
-            if (models && models.sequelize && typeof models.sequelize.authenticate === "function") {
-              return models.sequelize.authenticate();
-            }
-          })
-          .then(function () {
-            if (models && typeof models.syncAll === "function") {
-              return models.syncAll();
-            }
-          })
-          .catch(function (error) {
-            // Silently handle database errors - they're not critical for login
-            const errorMsg = errMsg(error);
-            if (!errorMsg.includes("No Sequelize instance passed")) {
-              // Only log non-Sequelize instance errors
-              logger(`Database connection failed: ${errorMsg}`, "warn");
-            }
-          });
+          if (models && typeof models.syncAll === "function") {
+            await models.syncAll();
+            cacheReady = models.isReady === true;
+          }
+        } catch (error) {
+          const errorMsg = errMsg(error);
+          if (!errorMsg.includes("No Sequelize instance passed")) {
+            logger(`SQLite cache initialization failed; cache operations may fail: ${errorMsg}`, "error");
+          }
+        }
+        if (cacheReady && userID) {
+          await backupAppStateSQL(sessionJar, userID);
+        }
         logger("FCA fix/update by Cexy (WonFCA)", "info");
         const emitter = new EventEmitter();
         const ctxMain = createFcaState({

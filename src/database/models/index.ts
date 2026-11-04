@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Sequelize, Transaction } from "sequelize";
+import { Sequelize } from "sequelize";
 
 import initThreadModel from "./thread";
 import initUserModel from "./user";
+import { createCacheInitializer } from "../initialize";
 
 type ModelsRecord = Record<string, Loose> & {
   sequelize?: Sequelize | null;
@@ -32,28 +33,28 @@ function attachModel(name: string, model: Loose) {
 try {
   const databasePath = ensureDatabaseDirectory();
 
-  sequelize = new Sequelize({
+  const database = new Sequelize({
     dialect: "sqlite",
     storage: path.join(databasePath, "database.sqlite"),
     logging: false,
     pool: {
-      max: 5,
+      max: 1,
       min: 0,
       acquire: 30000,
       idle: 10000
     },
     retry: {
-      max: 3
-    },
-    dialectOptions: {
-      timeout: 5000
-    },
-    isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED
+      match: [/SQLITE_BUSY/, /SQLITE_LOCKED/],
+      max: 5,
+      backoffBase: 100,
+      backoffExponent: 1.5
+    }
   });
+  sequelize = database;
 
   try {
-    attachModel("User", initUserModel(sequelize));
-    attachModel("Thread", initThreadModel(sequelize));
+    attachModel("User", initUserModel(database));
+    attachModel("Thread", initThreadModel(database));
 
     Object.keys(models).forEach((modelName) => {
       try {
@@ -72,18 +73,13 @@ try {
 
   models.sequelize = sequelize;
   models.Sequelize = Sequelize;
-  models.isReady = true;
+  models.isReady = false;
+  const initialize = createCacheInitializer(database, async () => {
+    await database.sync({ force: false });
+  });
   models.syncAll = async () => {
-    try {
-      if (!sequelize) {
-        throw new Error("Sequelize instance not initialized");
-      }
-      await sequelize.sync({ force: false });
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to synchronize models:", msg);
-      throw error;
-    }
+    await initialize();
+    models.isReady = true;
   };
 } catch (initError: unknown) {
   const msg = initError instanceof Error ? initError.message : String(initError);

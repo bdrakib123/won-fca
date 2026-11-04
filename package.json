@@ -1,6 +1,6 @@
 {
   "name": "@cexy/wonfca",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
   "main": "dist/cjs.cjs",
   "types": "dist/index.d.ts",
@@ -15,6 +15,9 @@
   "files": [
     "dist/",
     "docs/",
+    "scripts/check-package-exports.cjs",
+    "scripts/recover-sqlite-cache.cjs",
+    "scripts/sqlite-cache-dump.py",
     "README.md",
     "test/",
     "LICENSE",

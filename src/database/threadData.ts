@@ -4,6 +4,7 @@ import {
   normalizeAttributes,
   validateData,
   validateId,
+  findOrCreateRecord,
   wrapError
 } from "./helpers";
 
@@ -13,22 +14,23 @@ const ID_FIELD = "threadID";
 export default function createThreadData(_bot: Loose) {
   return {
     async create(threadID: Loose, data: Loose) {
-      if (!Thread) {
-        return { thread: { threadID: validateId(threadID, ID_FIELD), ...(data || {}) }, created: true };
-      }
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
-        let thread = await Thread.findOne({ where: { threadID: tid } });
-        if (thread) return { thread: thread.get(), created: false };
-        thread = await Thread.create({ threadID: tid, ...(data || {}) });
-        return { thread: thread.get(), created: true };
+        const { record: thread, created } = await findOrCreateRecord(
+          Thread,
+          ID_FIELD,
+          tid,
+          data || {}
+        );
+        return { thread: thread.get(), created };
       } catch (err) {
         throw wrapError("Failed to create thread", err);
       }
     },
 
     async get(threadID: Loose) {
-      if (!Thread) return null;
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
         const thread = await Thread.findOne({ where: { threadID: tid } });
@@ -39,19 +41,18 @@ export default function createThreadData(_bot: Loose) {
     },
 
     async update(threadID: Loose, data: Loose) {
-      if (!Thread) {
-        return { thread: { threadID: validateId(threadID, ID_FIELD), ...(data || {}) }, created: false };
-      }
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
         validateData(data);
-        const thread = await Thread.findOne({ where: { threadID: tid } });
-        if (thread) {
-          await thread.update(data);
-          return { thread: thread.get(), created: false };
-        }
-        const newThread = await Thread.create({ ...data, threadID: tid });
-        return { thread: newThread.get(), created: true };
+        const { record: thread, created } = await findOrCreateRecord(
+          Thread,
+          ID_FIELD,
+          tid,
+          data,
+          data
+        );
+        return { thread: thread.get(), created };
       } catch (err) {
         throw wrapError("Failed to update thread", err);
       }
@@ -70,7 +71,7 @@ export default function createThreadData(_bot: Loose) {
     },
 
     async delAll() {
-      if (!Thread) return 0;
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         return await Thread.destroy({ where: {} });
       } catch (err) {
@@ -79,7 +80,7 @@ export default function createThreadData(_bot: Loose) {
     },
 
     async getAll(keys: Loose = null) {
-      if (!Thread) return [];
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const attributes = normalizeAttributes(keys);
         const rows = await Thread.findAll({ attributes });

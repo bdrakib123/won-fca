@@ -5,35 +5,35 @@ import {
   normalizePayload,
   validateData,
   validateId,
+  findOrCreateRecord,
   wrapError
 } from "./helpers";
 
 const User = (models as { User?: Loose }).User;
 const ID_FIELD = "userID";
 
-function stubUser(userID: string, data: Loose) {
-  return { user: { userID, ...normalizePayload(data || {}, "data") }, created: true };
-}
-
 export default function createUserData(_bot: Loose) {
   return {
     async create(userID: Loose, data: Loose) {
-      if (!User) return stubUser(validateId(userID, ID_FIELD), data);
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD);
         validateData(data);
         const payload = normalizePayload(data, "data");
-        let user = await User.findOne({ where: { userID: uid } });
-        if (user) return { user: user.get(), created: false };
-        user = await User.create({ userID: uid, ...payload });
-        return { user: user.get(), created: true };
+        const { record: user, created } = await findOrCreateRecord(
+          User,
+          ID_FIELD,
+          uid,
+          payload
+        );
+        return { user: user.get(), created };
       } catch (err) {
         throw wrapError("Failed to create user", err);
       }
     },
 
     async get(userID: Loose) {
-      if (!User) return null;
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD);
         const user = await User.findOne({ where: { userID: uid } });
@@ -44,22 +44,19 @@ export default function createUserData(_bot: Loose) {
     },
 
     async update(userID: Loose, data: Loose) {
-      if (!User)
-        return {
-          user: { userID: validateId(userID, ID_FIELD), ...normalizePayload(data || {}, "data") },
-          created: false
-        };
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD);
         validateData(data);
         const payload = normalizePayload(data, "data");
-        const user = await User.findOne({ where: { userID: uid } });
-        if (user) {
-          await user.update(payload);
-          return { user: user.get(), created: false };
-        }
-        const newUser = await User.create({ userID: uid, ...payload });
-        return { user: newUser.get(), created: true };
+        const { record: user, created } = await findOrCreateRecord(
+          User,
+          ID_FIELD,
+          uid,
+          payload,
+          payload
+        );
+        return { user: user.get(), created };
       } catch (err) {
         throw wrapError("Failed to update user", err);
       }
@@ -78,7 +75,7 @@ export default function createUserData(_bot: Loose) {
     },
 
     async delAll() {
-      if (!User) return 0;
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         return await User.destroy({ where: {} });
       } catch (err) {
@@ -87,7 +84,7 @@ export default function createUserData(_bot: Loose) {
     },
 
     async getAll(keys: Loose = null) {
-      if (!User) return [];
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const attributes = normalizeAttributes(keys);
         const rows = await User.findAll({ attributes });

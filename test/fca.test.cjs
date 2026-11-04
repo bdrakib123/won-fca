@@ -3,9 +3,16 @@
 const assert = require("assert");
 const { EventEmitter } = require("node:events");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const crypto = require("crypto");
+const { spawnSync } = require("node:child_process");
+const { Sequelize, DataTypes, UniqueConstraintError } = require("sequelize");
+const sqlite3 = require("sqlite3");
+const ts = require("typescript");
 
 const fca = require("../dist/index.js");
+const recovery = require("../scripts/recover-sqlite-cache.cjs");
 
 const tests = [];
 const COOKIE_ATTRIBUTE_KEYS = new Set([
@@ -367,11 +374,384 @@ test("public exports are available", () => {
   assert.strictEqual(typeof fca.loadConfig, "function");
 });
 
+require.extensions[".ts"] = function compileTypeScript(module, filename) {
+  const source = fs.readFileSync(filename, "utf8");
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true
+    },
+    fileName: filename
+  });
+  module._compile(compiled.outputText, filename);
+};
+
+test("user and thread cache creation is idempotent under concurrency", async () => {
+  const { findOrCreateRecord } = require("../src/database/helpers.ts");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wonfca-cache-test-"));
+  const sequelize = new Sequelize({
+    dialect: "sqlite",
+    storage: path.join(directory, "cache.sqlite"),
+    logging: false,
+    pool: { max: 1 }
+  });
+  const User = sequelize.define("User", {
+    userID: { type: DataTypes.STRING, allowNull: false, unique: true },
+    data: DataTypes.TEXT
+  });
+  const Thread = sequelize.define("Thread", {
+    threadID: { type: DataTypes.STRING, allowNull: false, unique: true },
+    messageCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    data: DataTypes.TEXT
+  });
+
+  try {
+    await sequelize.sync();
+    const userResults = await Promise.all(
+      Array.from({ length: 30 }, () =>
+        findOrCreateRecord(User, "userID", "same-user", { data: "profile" })
+      )
+    );
+    const threadResults = await Promise.all(
+      Array.from({ length: 30 }, () =>
+        findOrCreateRecord(Thread, "threadID", "same-thread", { data: "thread" })
+      )
+    );
+    const distinctUsers = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        findOrCreateRecord(User, "userID", `user-${index}`, { data: "profile" })
+      )
+    );
+
+    assert.strictEqual(await User.count(), 13);
+    assert.strictEqual(await Thread.count(), 1);
+    assert.strictEqual(userResults.filter((result) => result.created).length, 1);
+    assert.strictEqual(threadResults.filter((result) => result.created).length, 1);
+    assert.strictEqual(distinctUsers.filter((result) => result.created).length, 12);
+
+    const { attachThreadUpdater } = require("../src/core/state.ts");
+    const context = {};
+    assert.strictEqual(attachThreadUpdater(context, { Thread }, () => {}), true);
+    await context._updateThreadFromMessage({ threadID: "same-thread" });
+    assert.strictEqual(
+      (await Thread.findOne({ where: { threadID: "same-thread" } })).messageCount,
+      1
+    );
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        context._updateThreadFromMessage({ threadID: "concurrent-thread" })
+      )
+    );
+    assert.strictEqual(
+      (await Thread.findOne({ where: { threadID: "concurrent-thread" } })).messageCount,
+      10
+    );
+
+    await assert.rejects(
+      sequelize.transaction(async (transaction) => {
+        await User.create({ userID: "rolled-back" }, { transaction });
+        throw new Error("simulate interrupted transaction");
+      }),
+      /simulate interrupted transaction/
+    );
+    assert.strictEqual(await User.findOne({ where: { userID: "rolled-back" } }), null);
+  } finally {
+    await sequelize.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cache create-or-get preserves unique conflicts and surfaces SQLite failures", async () => {
+  const { findOrCreateRecord, wrapError } = require("../src/database/helpers.ts");
+  const cached = { get: () => ({ userID: "duplicate" }) };
+  const duplicateError = new UniqueConstraintError({ message: "duplicate" });
+  const duplicateModel = {
+    findOrCreate: async () => { throw duplicateError; },
+    findOne: async () => cached
+  };
+  const duplicate = await findOrCreateRecord(
+    duplicateModel,
+    "userID",
+    "duplicate",
+    {}
+  );
+  assert.strictEqual(duplicate.record, cached);
+  assert.strictEqual(duplicate.created, false);
+
+  for (const code of ["SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_CORRUPT"]) {
+    const failure = Object.assign(new Error(`${code}: test failure`), {
+      original: { code }
+    });
+    const model = {
+      findOrCreate: async () => { throw failure; }
+    };
+    await assert.rejects(
+      findOrCreateRecord(model, "threadID", "thread", {}),
+      (error) => error === failure
+    );
+  }
+
+  const corruption = Object.assign(new Error("database disk image is malformed"), {
+    code: "SQLITE_CORRUPT",
+    original: { code: "SQLITE_CORRUPT" }
+  });
+  const wrapped = wrapError("Failed to create user", corruption);
+  assert.match(wrapped.message, /SQLITE_CORRUPT/);
+  assert.strictEqual(wrapped.code, "SQLITE_CORRUPT");
+  assert.strictEqual(wrapped.original, corruption.original);
+});
+
+test("cache initialization is shared, integrity-checked, and retryable after interruption", async () => {
+  const { createCacheInitializer } = require("../src/database/initialize.ts");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wonfca-init-test-"));
+  const sequelize = new Sequelize({
+    dialect: "sqlite",
+    storage: path.join(directory, "cache.sqlite"),
+    logging: false,
+    pool: { max: 1 }
+  });
+  let syncCalls = 0;
+  const initialize = createCacheInitializer(sequelize, async () => {
+    syncCalls += 1;
+    if (syncCalls === 1) {
+      throw new Error("simulated interrupted initialization");
+    }
+    await sequelize.define("CacheRecord", {
+      id: { type: DataTypes.STRING, primaryKey: true }
+    }).sync();
+  });
+
+  try {
+    await assert.rejects(initialize(), /simulated interrupted initialization/);
+    await Promise.all([initialize(), initialize()]);
+    assert.strictEqual(syncCalls, 2);
+    const [busyTimeout] = await sequelize.query("PRAGMA busy_timeout");
+    const [journalMode] = await sequelize.query("PRAGMA journal_mode");
+    assert.strictEqual(Number(Object.values(busyTimeout[0])[0]), 10000);
+    assert.strictEqual(String(Object.values(journalMode[0])[0]).toLowerCase(), "wal");
+  } finally {
+    await sequelize.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("corrupt cache initialization fails before schema synchronization", async () => {
+  const { createCacheInitializer } = require("../src/database/initialize.ts");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wonfca-corrupt-test-"));
+  const filename = path.join(directory, "cache.sqlite");
+  const setup = new Sequelize({ dialect: "sqlite", storage: filename, logging: false });
+  let syncCalls = 0;
+  let setupClosed = false;
+  let before;
+  let after;
+
+  try {
+    const User = setup.define("User", {
+      userID: { type: DataTypes.STRING, unique: true }
+    });
+    await User.sync();
+    await User.create({ userID: "preserve-me" });
+    await setup.close();
+    setupClosed = true;
+
+    const corruptor = await new Promise((resolve, reject) => {
+      const database = new sqlite3.Database(filename, (error) => {
+        error ? reject(error) : resolve(database);
+      });
+    });
+    await new Promise((resolve, reject) => {
+      corruptor.serialize(() => {
+        corruptor.run("PRAGMA writable_schema = ON");
+        corruptor.run(
+          "UPDATE sqlite_master SET rootpage = 99999 WHERE name = 'sqlite_autoindex_Users_1'",
+          (error) => error ? reject(error) : resolve()
+        );
+      });
+    });
+    await new Promise((resolve, reject) => {
+      corruptor.close((error) => error ? reject(error) : resolve());
+    });
+    before = crypto.createHash("sha256").update(fs.readFileSync(filename)).digest("hex");
+
+    const damaged = new Sequelize({ dialect: "sqlite", storage: filename, logging: false });
+    const initialize = createCacheInitializer(damaged, async () => {
+      syncCalls += 1;
+      await damaged.sync();
+    });
+    await assert.rejects(initialize());
+    await damaged.close();
+    after = crypto.createHash("sha256").update(fs.readFileSync(filename)).digest("hex");
+    assert.strictEqual(syncCalls, 0);
+    assert.strictEqual(after, before);
+  } finally {
+    if (!setupClosed) {
+      await setup.close().catch(() => {});
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cache recovery operates on separate copies and never overwrites existing paths", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wonfca-recovery-test-"));
+  const source = path.join(directory, "source.sqlite");
+  const snapshot = path.join(directory, "snapshot.sqlite");
+  const recovered = path.join(directory, "recovered.sqlite");
+  const pythonDump = path.join(directory, "python-dump.sqlite");
+  const rowSalvage = path.join(directory, "row-salvage.sqlite");
+  const sequelize = new Sequelize({ dialect: "sqlite", storage: source, logging: false });
+
+  try {
+    const Thread = sequelize.define("Threads", {
+      threadID: { type: DataTypes.STRING, primaryKey: true },
+      data: DataTypes.TEXT
+    });
+    await Thread.sync();
+    await Thread.bulkCreate([
+      { threadID: "thread-1", data: "one" },
+      { threadID: "thread-2", data: "two" }
+    ]);
+    await sequelize.close();
+    const sourceHash = crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex");
+
+    const report = await recovery.recoverCache({ source, snapshot, recovered });
+    assert.strictEqual(report.verified, true);
+    assert.strictEqual(report.snapshotCheck.integrityOk, true);
+    assert.strictEqual(report.recoveredCheck.integrityOk, true);
+    assert.deepStrictEqual(report.records.map((record) => record.missingRows), [0]);
+    assert.deepStrictEqual(report.indexDifferences, []);
+    assert.deepStrictEqual(report.tableDifferences, []);
+
+    fs.closeSync(fs.openSync(pythonDump, "wx"));
+    const pythonResult = spawnSync(
+      "python3",
+      [
+        path.join(__dirname, "../scripts/sqlite-cache-dump.py"),
+        source,
+        pythonDump
+      ],
+      { encoding: "utf8" }
+    );
+    assert.equal(pythonResult.status, 0, pythonResult.stderr);
+    const pythonCheck = await recovery.inspectDatabase(pythonDump);
+    assert.equal(pythonCheck.integrityOk, true);
+    assert.equal(pythonCheck.quickCheckOk, true);
+    const pythonRecords = await recovery.compareRecords(source, pythonDump);
+    assert.deepStrictEqual(pythonRecords.map((record) => record.missingRows), [0]);
+    assert.deepStrictEqual(pythonRecords.indexDifferences, []);
+    assert.deepStrictEqual(pythonRecords.tableDifferences, []);
+
+    fs.closeSync(fs.openSync(rowSalvage, "wx"));
+    const salvageResult = spawnSync(
+      "python3",
+      [
+        path.join(__dirname, "../scripts/sqlite-cache-dump.py"),
+        "--salvage-rows",
+        source,
+        rowSalvage
+      ],
+      { encoding: "utf8" }
+    );
+    assert.equal(salvageResult.status, 0, salvageResult.stderr);
+    const salvagedRecords = await recovery.compareRecords(source, rowSalvage);
+    assert.deepStrictEqual(salvagedRecords.map((record) => record.missingRows), [0]);
+    assert.deepStrictEqual(salvagedRecords.map((record) => record.extraRows), [0]);
+    assert.strictEqual(salvagedRecords[0].schemaMismatch, true);
+    assert.strictEqual(salvagedRecords[0].indexMismatch, true);
+    assert.strictEqual(
+      crypto.createHash("sha256").update(fs.readFileSync(source)).digest("hex"),
+      sourceHash
+    );
+    await assert.rejects(
+      recovery.recoverCache({ source, snapshot, recovered }),
+      /must not already exist/
+    );
+
+    const corruptSource = path.join(directory, "corrupt-source.sqlite");
+    const corruptSnapshot = path.join(directory, "corrupt-snapshot.sqlite");
+    const corruptRecovered = path.join(directory, "corrupt-recovered.sqlite");
+    const damaged = new Sequelize({
+      dialect: "sqlite",
+      storage: corruptSource,
+      logging: false
+    });
+    const DamagedThread = damaged.define("Threads", {
+      threadID: { type: DataTypes.STRING, unique: true },
+      data: DataTypes.TEXT
+    });
+    await DamagedThread.sync();
+    await DamagedThread.create({ threadID: "keep", data: "value" });
+    await damaged.close();
+    const corruptor = await new Promise((resolve, reject) => {
+      const database = new sqlite3.Database(corruptSource, (error) => {
+        error ? reject(error) : resolve(database);
+      });
+    });
+    await new Promise((resolve, reject) => {
+      corruptor.serialize(() => {
+        corruptor.run("PRAGMA writable_schema = ON");
+        corruptor.run(
+          "UPDATE sqlite_master SET rootpage = 99999 WHERE name = 'sqlite_autoindex_Threads_1'",
+          (error) => error ? reject(error) : resolve()
+        );
+      });
+    });
+    await new Promise((resolve, reject) => {
+      corruptor.close((error) => error ? reject(error) : resolve());
+    });
+    const corruptHash = crypto.createHash("sha256").update(fs.readFileSync(corruptSource)).digest("hex");
+    const failedRecovery = await recovery.recoverCache({
+      source: corruptSource,
+      snapshot: corruptSnapshot,
+      recovered: corruptRecovered
+    });
+    assert.strictEqual(failedRecovery.verified, false);
+    assert.strictEqual(failedRecovery.snapshotCheck.integrityOk, false);
+    assert.ok(failedRecovery.recoveryError || !failedRecovery.recoveredCheck.integrityOk);
+    assert.ok(
+      failedRecovery.records.some((record) => record.missingRows > 0) ||
+      failedRecovery.records.some((record) => record.schemaMismatch) ||
+      failedRecovery.recordComparisonError
+    );
+    assert.strictEqual(
+      crypto.createHash("sha256").update(fs.readFileSync(corruptSource)).digest("hex"),
+      corruptHash
+    );
+  } finally {
+    await sequelize.close().catch(() => {});
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("dist/cjs.cjs default export is callable login (Mirai / classic require)", () => {
   const login = require("../dist/cjs.cjs");
   assert.strictEqual(typeof login, "function");
   assert.strictEqual(typeof login.login, "function");
   assert.strictEqual(typeof login.createMessengerBot, "function");
+});
+
+test("package export validation checks files without loading package entrypoints", () => {
+  const checker = path.join(__dirname, "../scripts/check-package-exports.cjs");
+  const source = fs.readFileSync(checker, "utf8");
+  assert.doesNotMatch(
+    source,
+    /^\s*(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*["'](?:\.\.?\/|@cexy\/wonfca)/m
+  );
+  assert.doesNotMatch(
+    source,
+    /^\s*(?:const|let|var)\s+\w+\s*=\s*import\s*\(\s*["'](?:\.\.?\/|@cexy\/wonfca)/m
+  );
+
+  const result = spawnSync(process.execPath, [checker], {
+    cwd: os.tmpdir(),
+    encoding: "utf8"
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.strictEqual(report.package, "@cexy/wonfca");
+  assert.strictEqual(report.targets.require, "./dist/cjs.cjs");
+  assert.strictEqual(report.targets.import, "./dist/index.mjs");
+  assert.strictEqual(report.targets.types, "./dist/index.d.ts");
 });
 
 test("resolveConfig honors legacy autoUpdate alias", () => {

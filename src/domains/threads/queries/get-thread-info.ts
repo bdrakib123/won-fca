@@ -160,7 +160,7 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
 
     const fresh: Record<string, ThreadInfo> = {};
     const stale: string[] = [];
-    const rows = await Promise.all(ids.map((id) => get(id).catch(() => null)));
+    const rows = await Promise.all(ids.map((id) => get(id)));
     const now = Date.now();
 
     for (let index = 0; index < ids.length; index += 1) {
@@ -307,14 +307,14 @@ export function createGetThreadInfoQuery(deps: GetThreadInfoQueryDeps) {
 
       const payload = { data: info };
       if (typeof update === "function") {
-        tasks.push(update(id, payload).catch(() => null));
+        tasks.push(update(id, payload));
       } else if (typeof create === "function") {
-        tasks.push(create(id, payload).catch(() => null));
+        tasks.push(create(id, payload));
       }
     }
 
     if (tasks.length) {
-      await Promise.all(tasks).catch(() => null);
+      await Promise.all(tasks);
     }
   }
 

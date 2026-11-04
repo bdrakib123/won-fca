@@ -1,3 +1,5 @@
+import { serializeSqliteWrite } from "../database/helpers";
+
 export interface FcaOptions {
   logLevel?: "silly" | "info" | "warn" | "error" | "silent";
   listenEvents?: boolean;
@@ -189,25 +191,31 @@ export function attachThreadUpdater(
       try {
         if (!msg || !msg.threadID) return;
         const id = String(msg.threadID);
-        let affected = 0;
-        try {
-          const res = await Thread.increment("messageCount", {
+        await serializeSqliteWrite(Thread, async () => {
+          const increment = () => Thread.increment("messageCount", {
             by: 1,
             where: { threadID: id }
           });
-          if (Array.isArray(res) && typeof res[0] === "number") {
-            affected = res[0];
-          }
-        } catch { }
-        if (!affected) {
-          try {
-            await Thread.create({
-              threadID: id,
-              messageCount: 1,
-              data: { threadID: id }
+          const res = await increment();
+          const affectedCount = Array.isArray(res?.[0])
+            ? res[0][1]
+            : res?.[0];
+          const affected = typeof affectedCount === "number"
+            ? affectedCount
+            : 0;
+          if (!affected) {
+            const [, created] = await Thread.findOrCreate({
+              where: { threadID: id },
+              defaults: {
+                messageCount: 1,
+                data: JSON.stringify({ threadID: id })
+              }
             });
-          } catch { }
-        }
+            if (!created) {
+              await increment();
+            }
+          }
+        });
       } catch (e: Loose) {
         const msgText = e && e.message ? e.message : String(e);
         logger(`updateThreadFromMessage error: ${msgText}`, "warn");
@@ -218,5 +226,3 @@ export function attachThreadUpdater(
     return false;
   }
 }
-
-

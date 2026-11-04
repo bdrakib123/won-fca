@@ -30,12 +30,12 @@ export interface GetUserInfoQueryDeps {
 }
 
 export function createGetUserInfoQuery(deps: GetUserInfoQueryDeps) {
-  const { defaultFuncs, api, ctx, logger, logError } = deps;
+  const { defaultFuncs, api, ctx, logError } = deps;
   const globalConfig = (global as Loose).fca?.config;
   const disableAntiUserInfo = Boolean(globalConfig?.antiGetInfo?.AntiGetUserInfo === true);
 
   const userData = createUserData(api);
-  const { create, get, update } = userData;
+  const { update } = userData;
 
   async function fetchPrimary(ids: string[]): Promise<Record<string, NormalizedUser>> {
     if (!ids.length) {
@@ -126,21 +126,12 @@ export function createGetUserInfoQuery(deps: GetUserInfoQueryDeps) {
   }
 
   async function upsertUser(id: string, entry: UserInfoEntry): Promise<void> {
-    try {
-      const existing = await get(id);
-      if (existing) {
-        await update(id, { data: entry });
-      } else {
-        await create(id, { data: entry });
-      }
-    } catch (error: Loose) {
-      logger?.(`user upsert ${id} error: ${error?.message || String(error)}`, "warn");
-    }
+    await update(id, { data: entry });
   }
 
   async function loadCached(ids: string[]): Promise<UserInfoMap> {
     const out: UserInfoMap = {};
-    const rows = await Promise.all(ids.map((id) => get(id).catch(() => null)));
+    const rows = await Promise.all(ids.map((id) => userData.get(id)));
 
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];

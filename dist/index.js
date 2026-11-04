@@ -1344,6 +1344,104 @@ var require_format = __commonJS({
   }
 });
 
+// src/database/helpers.ts
+async function serializeSqliteWrite(Model3, operation) {
+  const sequelize2 = Model3.sequelize;
+  const queueKey = sequelize2?.getDialect?.() === "sqlite" ? sequelize2 : null;
+  if (!queueKey) return operation();
+  const previous = sqliteWriteQueues.get(queueKey);
+  let release;
+  const queued = new Promise((resolve) => {
+    release = resolve;
+  });
+  const tail = previous ? previous.catch(() => {
+  }).then(() => queued) : queued;
+  sqliteWriteQueues.set(queueKey, tail);
+  await previous?.catch(() => {
+  });
+  try {
+    return await operation();
+  } finally {
+    release?.();
+    if (sqliteWriteQueues.get(queueKey) === tail) {
+      sqliteWriteQueues.delete(queueKey);
+    }
+  }
+}
+function validateId(value, fieldName = "id") {
+  if (value == null) {
+    throw new Error(`${fieldName} is required and cannot be undefined`);
+  }
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw new Error(`Invalid ${fieldName}: must be a string or number`);
+  }
+  return String(value);
+}
+function validateData(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Invalid data: must be a non-empty object");
+  }
+}
+function normalizeAttributes(keys) {
+  if (keys == null) return void 0;
+  return typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : void 0;
+}
+function normalizePayload(data, key = "data") {
+  return Object.prototype.hasOwnProperty.call(data, key) ? data : { [key]: data };
+}
+function wrapError(message, cause) {
+  const c = cause;
+  const causeDetails = cause;
+  const causeCode = causeDetails?.code || causeDetails?.original?.code;
+  const causeMessage = c && c.message ? c.message : String(cause);
+  const detail = causeCode && !causeMessage.includes(causeCode) ? `${causeCode}: ${causeMessage}` : causeMessage;
+  const wrapped = new Error(`${message}: ${detail}`);
+  if (cause instanceof Error) {
+    wrapped.cause = cause;
+    const original = cause;
+    if (original.code) {
+      wrapped.code = original.code;
+    }
+    if (original.original) {
+      wrapped.original = original.original;
+    }
+  }
+  return wrapped;
+}
+async function findOrCreateRecord(Model3, idField, id, defaults, updateExisting) {
+  return serializeSqliteWrite(Model3, async () => {
+    const where = { [idField]: id };
+    let record;
+    let created;
+    try {
+      [record, created] = await Model3.findOrCreate({ where, defaults });
+    } catch (error) {
+      const isUniqueConflict = error instanceof import_sequelize.UniqueConstraintError || error?.name === "SequelizeUniqueConstraintError";
+      if (!isUniqueConflict) {
+        throw error;
+      }
+      record = await Model3.findOne({ where });
+      if (!record) {
+        throw error;
+      }
+      created = false;
+    }
+    if (!created && updateExisting) {
+      await record.update(updateExisting);
+    }
+    return { record, created };
+  });
+}
+var import_sequelize, DB_NOT_INIT, sqliteWriteQueues;
+var init_helpers = __esm({
+  "src/database/helpers.ts"() {
+    "use strict";
+    import_sequelize = require("sequelize");
+    DB_NOT_INIT = "Database not initialized";
+    sqliteWriteQueues = /* @__PURE__ */ new WeakMap();
+  }
+});
+
 // src/core/state.ts
 function createStateStore(initialState) {
   const state = Object.assign({}, initialState);
@@ -1448,27 +1546,27 @@ function attachThreadUpdater(ctx, models2, logger) {
       try {
         if (!msg || !msg.threadID) return;
         const id = String(msg.threadID);
-        let affected = 0;
-        try {
-          const res = await Thread2.increment("messageCount", {
+        await serializeSqliteWrite(Thread2, async () => {
+          const increment = () => Thread2.increment("messageCount", {
             by: 1,
             where: { threadID: id }
           });
-          if (Array.isArray(res) && typeof res[0] === "number") {
-            affected = res[0];
-          }
-        } catch {
-        }
-        if (!affected) {
-          try {
-            await Thread2.create({
-              threadID: id,
-              messageCount: 1,
-              data: { threadID: id }
+          const res = await increment();
+          const affectedCount = Array.isArray(res?.[0]) ? res[0][1] : res?.[0];
+          const affected = typeof affectedCount === "number" ? affectedCount : 0;
+          if (!affected) {
+            const [, created] = await Thread2.findOrCreate({
+              where: { threadID: id },
+              defaults: {
+                messageCount: 1,
+                data: JSON.stringify({ threadID: id })
+              }
             });
-          } catch {
+            if (!created) {
+              await increment();
+            }
           }
-        }
+        });
       } catch (e) {
         const msgText = e && e.message ? e.message : String(e);
         logger(`updateThreadFromMessage error: ${msgText}`, "warn");
@@ -1483,6 +1581,7 @@ var createDefaultContext;
 var init_state = __esm({
   "src/core/state.ts"() {
     "use strict";
+    init_helpers();
     createDefaultContext = () => ({
       fbid: "",
       clientId: (Math.random() * 2147483648 | 0).toString(16),
@@ -4756,7 +4855,7 @@ function isPairArrayList(arr) {
   return Array.isArray(arr) && arr.length > 0 && arr.every((x) => Array.isArray(x) && x.length === 2 && typeof x[0] === "string");
 }
 var import_format2, formatNs, getType3;
-var init_helpers = __esm({
+var init_helpers2 = __esm({
   "src/utils/request/helpers.ts"() {
     "use strict";
     import_format2 = __toESM(require_format());
@@ -4901,7 +5000,7 @@ var init_methods = __esm({
     init_config();
     init_client();
     init_retry();
-    init_helpers();
+    init_helpers2();
   }
 });
 
@@ -5304,7 +5403,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.2.0",
+      version: "1.2.1",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -5319,6 +5418,9 @@ var init_package = __esm({
       files: [
         "dist/",
         "docs/",
+        "scripts/check-package-exports.cjs",
+        "scripts/recover-sqlite-cache.cjs",
+        "scripts/sqlite-cache-dump.py",
         "README.md",
         "test/",
         "LICENSE",
@@ -5657,7 +5759,7 @@ function formatCookie(arr, service) {
   return `${n}=${v}; Domain=.${service}.com; Path=/; Secure`;
 }
 var delay2;
-var init_helpers2 = __esm({
+var init_helpers3 = __esm({
   "src/utils/loginParser/helpers.ts"() {
     "use strict";
     delay2 = (ms) => new Promise((resolve) => {
@@ -5846,7 +5948,7 @@ var init_parseAndCheckLogin = __esm({
     "use strict";
     init_logger();
     init_autoLogin();
-    init_helpers2();
+    init_helpers3();
     init_textUtils();
   }
 });
@@ -9930,28 +10032,28 @@ var init_scheduler = __esm({
 
 // src/database/models/thread.ts
 function initThreadModel(sequelize2) {
-  class Thread2 extends import_sequelize.Model {
+  class Thread2 extends import_sequelize2.Model {
   }
   Thread2.init(
     {
       num: {
-        type: import_sequelize.DataTypes.INTEGER,
+        type: import_sequelize2.DataTypes.INTEGER,
         allowNull: false,
         autoIncrement: true,
         primaryKey: true
       },
       threadID: {
-        type: import_sequelize.DataTypes.STRING,
+        type: import_sequelize2.DataTypes.STRING,
         allowNull: false,
         unique: true
       },
       messageCount: {
-        type: import_sequelize.DataTypes.INTEGER,
+        type: import_sequelize2.DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 0
       },
       data: {
-        type: import_sequelize.DataTypes.TEXT,
+        type: import_sequelize2.DataTypes.TEXT,
         allowNull: true,
         get() {
           const value = this.getDataValue("data");
@@ -9977,33 +10079,33 @@ function initThreadModel(sequelize2) {
   );
   return Thread2;
 }
-var import_sequelize;
+var import_sequelize2;
 var init_thread = __esm({
   "src/database/models/thread.ts"() {
     "use strict";
-    import_sequelize = require("sequelize");
+    import_sequelize2 = require("sequelize");
   }
 });
 
 // src/database/models/user.ts
 function initUserModel(sequelize2) {
-  class User2 extends import_sequelize2.Model {
+  class User2 extends import_sequelize3.Model {
   }
   User2.init(
     {
       num: {
-        type: import_sequelize2.DataTypes.INTEGER,
+        type: import_sequelize3.DataTypes.INTEGER,
         allowNull: false,
         autoIncrement: true,
         primaryKey: true
       },
       userID: {
-        type: import_sequelize2.DataTypes.STRING,
+        type: import_sequelize3.DataTypes.STRING,
         allowNull: false,
         unique: true
       },
       data: {
-        type: import_sequelize2.DataTypes.TEXT,
+        type: import_sequelize3.DataTypes.TEXT,
         allowNull: true,
         get() {
           const value = this.getDataValue("data");
@@ -10029,11 +10131,41 @@ function initUserModel(sequelize2) {
   );
   return User2;
 }
-var import_sequelize2;
+var import_sequelize3;
 var init_user = __esm({
   "src/database/models/user.ts"() {
     "use strict";
-    import_sequelize2 = require("sequelize");
+    import_sequelize3 = require("sequelize");
+  }
+});
+
+// src/database/initialize.ts
+function createCacheInitializer(sequelize2, syncModels) {
+  let initialization = null;
+  return () => {
+    if (!initialization) {
+      initialization = (async () => {
+        await sequelize2.authenticate();
+        const [rows] = await sequelize2.query("PRAGMA integrity_check");
+        const results = rows;
+        const integrity = results.map((row) => String(Object.values(row)[0] ?? ""));
+        if (integrity.length !== 1 || integrity[0] !== "ok") {
+          throw new Error(`SQLite cache integrity check failed: ${integrity.join("; ") || "no result"}`);
+        }
+        await sequelize2.query("PRAGMA busy_timeout = 10000");
+        await sequelize2.query("PRAGMA journal_mode = WAL");
+        await syncModels();
+      })().catch((error) => {
+        initialization = null;
+        throw error;
+      });
+    }
+    return initialization;
+  };
+}
+var init_initialize = __esm({
+  "src/database/initialize.ts"() {
+    "use strict";
   }
 });
 
@@ -10050,40 +10182,41 @@ function attachModel(name, model) {
     models[name] = model;
   }
 }
-var import_node_fs3, import_node_path3, import_sequelize3, sequelize, models, models_default;
+var import_node_fs3, import_node_path3, import_sequelize4, sequelize, models, models_default;
 var init_models = __esm({
   "src/database/models/index.ts"() {
     "use strict";
     import_node_fs3 = __toESM(require("fs"));
     import_node_path3 = __toESM(require("path"));
-    import_sequelize3 = require("sequelize");
+    import_sequelize4 = require("sequelize");
     init_thread();
     init_user();
+    init_initialize();
     sequelize = null;
     models = {};
     try {
       const databasePath = ensureDatabaseDirectory();
-      sequelize = new import_sequelize3.Sequelize({
+      const database = new import_sequelize4.Sequelize({
         dialect: "sqlite",
         storage: import_node_path3.default.join(databasePath, "database.sqlite"),
         logging: false,
         pool: {
-          max: 5,
+          max: 1,
           min: 0,
           acquire: 3e4,
           idle: 1e4
         },
         retry: {
-          max: 3
-        },
-        dialectOptions: {
-          timeout: 5e3
-        },
-        isolationLevel: import_sequelize3.Transaction.ISOLATION_LEVELS.READ_COMMITTED
+          match: [/SQLITE_BUSY/, /SQLITE_LOCKED/],
+          max: 5,
+          backoffBase: 100,
+          backoffExponent: 1.5
+        }
       });
+      sequelize = database;
       try {
-        attachModel("User", initUserModel(sequelize));
-        attachModel("Thread", initThreadModel(sequelize));
+        attachModel("User", initUserModel(database));
+        attachModel("Thread", initThreadModel(database));
         Object.keys(models).forEach((modelName) => {
           try {
             if (models[modelName].associate) {
@@ -10099,25 +10232,20 @@ var init_models = __esm({
         console.error("Failed to load models:", msg);
       }
       models.sequelize = sequelize;
-      models.Sequelize = import_sequelize3.Sequelize;
-      models.isReady = true;
+      models.Sequelize = import_sequelize4.Sequelize;
+      models.isReady = false;
+      const initialize = createCacheInitializer(database, async () => {
+        await database.sync({ force: false });
+      });
       models.syncAll = async () => {
-        try {
-          if (!sequelize) {
-            throw new Error("Sequelize instance not initialized");
-          }
-          await sequelize.sync({ force: false });
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          console.error("Failed to synchronize models:", msg);
-          throw error;
-        }
+        await initialize();
+        models.isReady = true;
       };
     } catch (initError) {
       const msg = initError instanceof Error ? initError.message : String(initError);
       console.error("Database initialization error:", msg);
       models.sequelize = null;
-      models.Sequelize = import_sequelize3.Sequelize;
+      models.Sequelize = import_sequelize4.Sequelize;
       models.isReady = false;
       models.syncAll = async () => {
         throw new Error("Database not initialized");
@@ -10127,59 +10255,26 @@ var init_models = __esm({
   }
 });
 
-// src/database/helpers.ts
-function validateId(value, fieldName = "id") {
-  if (value == null) {
-    throw new Error(`${fieldName} is required and cannot be undefined`);
-  }
-  if (typeof value !== "string" && typeof value !== "number") {
-    throw new Error(`Invalid ${fieldName}: must be a string or number`);
-  }
-  return String(value);
-}
-function validateData(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("Invalid data: must be a non-empty object");
-  }
-}
-function normalizeAttributes(keys) {
-  if (keys == null) return void 0;
-  return typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : void 0;
-}
-function normalizePayload(data, key = "data") {
-  return Object.prototype.hasOwnProperty.call(data, key) ? data : { [key]: data };
-}
-function wrapError(message, cause) {
-  const c = cause;
-  return new Error(`${message}: ${c && c.message ? c.message : cause}`);
-}
-var DB_NOT_INIT;
-var init_helpers3 = __esm({
-  "src/database/helpers.ts"() {
-    "use strict";
-    DB_NOT_INIT = "Database not initialized";
-  }
-});
-
 // src/database/threadData.ts
 function createThreadData(_bot) {
   return {
     async create(threadID, data) {
-      if (!Thread) {
-        return { thread: { threadID: validateId(threadID, ID_FIELD), ...data || {} }, created: true };
-      }
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
-        let thread = await Thread.findOne({ where: { threadID: tid } });
-        if (thread) return { thread: thread.get(), created: false };
-        thread = await Thread.create({ threadID: tid, ...data || {} });
-        return { thread: thread.get(), created: true };
+        const { record: thread, created } = await findOrCreateRecord(
+          Thread,
+          ID_FIELD,
+          tid,
+          data || {}
+        );
+        return { thread: thread.get(), created };
       } catch (err) {
         throw wrapError("Failed to create thread", err);
       }
     },
     async get(threadID) {
-      if (!Thread) return null;
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
         const thread = await Thread.findOne({ where: { threadID: tid } });
@@ -10189,19 +10284,18 @@ function createThreadData(_bot) {
       }
     },
     async update(threadID, data) {
-      if (!Thread) {
-        return { thread: { threadID: validateId(threadID, ID_FIELD), ...data || {} }, created: false };
-      }
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const tid = validateId(threadID, ID_FIELD);
         validateData(data);
-        const thread = await Thread.findOne({ where: { threadID: tid } });
-        if (thread) {
-          await thread.update(data);
-          return { thread: thread.get(), created: false };
-        }
-        const newThread = await Thread.create({ ...data, threadID: tid });
-        return { thread: newThread.get(), created: true };
+        const { record: thread, created } = await findOrCreateRecord(
+          Thread,
+          ID_FIELD,
+          tid,
+          data,
+          data
+        );
+        return { thread: thread.get(), created };
       } catch (err) {
         throw wrapError("Failed to update thread", err);
       }
@@ -10218,7 +10312,7 @@ function createThreadData(_bot) {
       }
     },
     async delAll() {
-      if (!Thread) return 0;
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         return await Thread.destroy({ where: {} });
       } catch (err) {
@@ -10226,7 +10320,7 @@ function createThreadData(_bot) {
       }
     },
     async getAll(keys = null) {
-      if (!Thread) return [];
+      if (!Thread) throw new Error(DB_NOT_INIT);
       try {
         const attributes = normalizeAttributes(keys);
         const rows = await Thread.findAll({ attributes });
@@ -10242,7 +10336,7 @@ var init_threadData = __esm({
   "src/database/threadData.ts"() {
     "use strict";
     init_models();
-    init_helpers3();
+    init_helpers();
     Thread = models_default.Thread;
     ID_FIELD = "threadID";
   }
@@ -10372,7 +10466,7 @@ function createGetThreadInfoQuery(deps) {
     }
     const fresh = {};
     const stale = [];
-    const rows = await Promise.all(ids.map((id) => get3(id).catch(() => null)));
+    const rows = await Promise.all(ids.map((id) => get3(id)));
     const now = Date.now();
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];
@@ -10470,13 +10564,13 @@ function createGetThreadInfoQuery(deps) {
       }
       const payload = { data: info };
       if (typeof update === "function") {
-        tasks.push(update(id, payload).catch(() => null));
+        tasks.push(update(id, payload));
       } else if (typeof create === "function") {
-        tasks.push(create(id, payload).catch(() => null));
+        tasks.push(create(id, payload));
       }
     }
     if (tasks.length) {
-      await Promise.all(tasks).catch(() => null);
+      await Promise.all(tasks);
     }
   }
   return function getThreadInfo(threadID, callback) {
@@ -12397,27 +12491,27 @@ var init_shared = __esm({
 });
 
 // src/database/userData.ts
-function stubUser(userID, data) {
-  return { user: { userID, ...normalizePayload(data || {}, "data") }, created: true };
-}
 function createUserData(_bot) {
   return {
     async create(userID, data) {
-      if (!User) return stubUser(validateId(userID, ID_FIELD2), data);
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD2);
         validateData(data);
         const payload = normalizePayload(data, "data");
-        let user = await User.findOne({ where: { userID: uid } });
-        if (user) return { user: user.get(), created: false };
-        user = await User.create({ userID: uid, ...payload });
-        return { user: user.get(), created: true };
+        const { record: user, created } = await findOrCreateRecord(
+          User,
+          ID_FIELD2,
+          uid,
+          payload
+        );
+        return { user: user.get(), created };
       } catch (err) {
         throw wrapError("Failed to create user", err);
       }
     },
     async get(userID) {
-      if (!User) return null;
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD2);
         const user = await User.findOne({ where: { userID: uid } });
@@ -12427,22 +12521,19 @@ function createUserData(_bot) {
       }
     },
     async update(userID, data) {
-      if (!User)
-        return {
-          user: { userID: validateId(userID, ID_FIELD2), ...normalizePayload(data || {}, "data") },
-          created: false
-        };
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const uid = validateId(userID, ID_FIELD2);
         validateData(data);
         const payload = normalizePayload(data, "data");
-        const user = await User.findOne({ where: { userID: uid } });
-        if (user) {
-          await user.update(payload);
-          return { user: user.get(), created: false };
-        }
-        const newUser = await User.create({ userID: uid, ...payload });
-        return { user: newUser.get(), created: true };
+        const { record: user, created } = await findOrCreateRecord(
+          User,
+          ID_FIELD2,
+          uid,
+          payload,
+          payload
+        );
+        return { user: user.get(), created };
       } catch (err) {
         throw wrapError("Failed to update user", err);
       }
@@ -12459,7 +12550,7 @@ function createUserData(_bot) {
       }
     },
     async delAll() {
-      if (!User) return 0;
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         return await User.destroy({ where: {} });
       } catch (err) {
@@ -12467,7 +12558,7 @@ function createUserData(_bot) {
       }
     },
     async getAll(keys = null) {
-      if (!User) return [];
+      if (!User) throw new Error(DB_NOT_INIT);
       try {
         const attributes = normalizeAttributes(keys);
         const rows = await User.findAll({ attributes });
@@ -12483,7 +12574,7 @@ var init_userData = __esm({
   "src/database/userData.ts"() {
     "use strict";
     init_models();
-    init_helpers3();
+    init_helpers();
     User = models_default.User;
     ID_FIELD2 = "userID";
   }
@@ -12491,11 +12582,11 @@ var init_userData = __esm({
 
 // src/domains/users/queries/get-user-info.ts
 function createGetUserInfoQuery(deps) {
-  const { defaultFuncs, api, ctx, logger, logError: logError2 } = deps;
+  const { defaultFuncs, api, ctx, logError: logError2 } = deps;
   const globalConfig = global.fca?.config;
   const disableAntiUserInfo = Boolean(globalConfig?.antiGetInfo?.AntiGetUserInfo === true);
   const userData = createUserData(api);
-  const { create, get: get3, update } = userData;
+  const { update } = userData;
   async function fetchPrimary(ids) {
     if (!ids.length) {
       return {};
@@ -12575,20 +12666,11 @@ function createGetUserInfoQuery(deps) {
     return out;
   }
   async function upsertUser(id, entry) {
-    try {
-      const existing = await get3(id);
-      if (existing) {
-        await update(id, { data: entry });
-      } else {
-        await create(id, { data: entry });
-      }
-    } catch (error) {
-      logger?.(`user upsert ${id} error: ${error?.message || String(error)}`, "warn");
-    }
+    await update(id, { data: entry });
   }
   async function loadCached(ids) {
     const out = {};
-    const rows = await Promise.all(ids.map((id) => get3(id).catch(() => null)));
+    const rows = await Promise.all(ids.map((id) => userData.get(id)));
     for (let index = 0; index < ids.length; index += 1) {
       const id = ids[index];
       const row = rows[index];
@@ -15714,14 +15796,14 @@ function getBackupModel() {
     if (!sequelize2 || typeof sequelize2.define !== "function") return null;
     if (sequelize2.models && sequelize2.models.AppStateBackup) return sequelize2.models.AppStateBackup;
     const dialect = typeof sequelize2.getDialect === "function" ? sequelize2.getDialect() : "sqlite";
-    const LongText = dialect === "mysql" || dialect === "mariadb" ? import_sequelize4.DataTypes.TEXT("long") : import_sequelize4.DataTypes.TEXT;
+    const LongText = dialect === "mysql" || dialect === "mariadb" ? import_sequelize5.DataTypes.TEXT("long") : import_sequelize5.DataTypes.TEXT;
     try {
       const AppStateBackup = sequelize2.define(
         "AppStateBackup",
         {
-          id: { type: import_sequelize4.DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-          userID: { type: import_sequelize4.DataTypes.STRING, allowNull: false },
-          type: { type: import_sequelize4.DataTypes.STRING, allowNull: false },
+          id: { type: import_sequelize5.DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          userID: { type: import_sequelize5.DataTypes.STRING, allowNull: false },
+          type: { type: import_sequelize5.DataTypes.STRING, allowNull: false },
           data: { type: LongText }
         },
         { tableName: "app_state_backups", timestamps: true, indexes: [{ unique: true, fields: ["userID", "type"] }] }
@@ -15732,36 +15814,29 @@ function getBackupModel() {
       return null;
     }
   } catch (e) {
+    logger_default(`Failed to initialize AppStateBackup model: ${errMsg(e)}`, "warn");
     return null;
   }
 }
-async function ensureUniqueIndex(sequelize2) {
-  if (uniqueIndexEnsured || !sequelize2) return;
-  try {
-    if (typeof sequelize2.getQueryInterface !== "function") return;
-    await sequelize2.getQueryInterface().addIndex("app_state_backups", ["userID", "type"], { unique: true, name: "app_state_user_type_unique" });
-  } catch {
-  }
-  uniqueIndexEnsured = true;
-}
 async function upsertBackup(Model3, userID, type, data) {
   const where = { userID: String(userID || ""), type };
-  const row = await Model3.findOne({ where });
-  if (row) {
-    await row.update({ data });
-    logger_default(`Overwrote existing ${type} backup for user ${where.userID}`, "sys");
-    return;
-  }
-  await Model3.create({ ...where, data });
-  logger_default(`Created new ${type} backup for user ${where.userID}`, "sys");
+  await serializeSqliteWrite(Model3, async () => {
+    const [row, created] = await Model3.findOrCreate({
+      where,
+      defaults: { data }
+    });
+    if (!created) {
+      await row.update({ data });
+    }
+  });
+  logger_default(`Stored ${type} backup for user ${where.userID}`, "sys");
 }
 async function backupAppStateSQL(j, userID) {
   try {
     const Model3 = getBackupModel();
-    if (!Model3) return;
-    if (!models_default || !models_default.sequelize) return;
+    if (!Model3) throw new Error("AppStateBackup model unavailable");
+    if (!models_default || !models_default.sequelize) throw new Error("SQLite cache unavailable");
     await Model3.sync();
-    await ensureUniqueIndex(models_default.sequelize);
     const appJson = getAppState(j);
     const ck = cookieHeaderFromJar(j);
     await upsertBackup(Model3, userID, "appstate", JSON.stringify(appJson));
@@ -15774,21 +15849,23 @@ async function backupAppStateSQL(j, userID) {
 async function getLatestBackup(userID, type) {
   try {
     const Model3 = getBackupModel();
-    if (!Model3) return null;
+    if (!Model3) throw new Error("AppStateBackup model unavailable");
     const row = await Model3.findOne({ where: { userID: String(userID || ""), type } });
     return row ? row.data : null;
-  } catch {
-    return null;
+  } catch (error) {
+    logger_default(`Failed to read SQLite session backup: ${errMsg(error)}`, "warn");
+    throw error;
   }
 }
 async function getLatestBackupAny(type) {
   try {
     const Model3 = getBackupModel();
-    if (!Model3) return null;
+    if (!Model3) throw new Error("AppStateBackup model unavailable");
     const row = await Model3.findOne({ where: { type }, order: [["updatedAt", "DESC"]] });
     return row ? row.data : null;
-  } catch {
-    return null;
+  } catch (error) {
+    logger_default(`Failed to read SQLite session backup: ${errMsg(error)}`, "warn");
+    throw error;
   }
 }
 async function setJarCookies(j, appstate) {
@@ -15866,6 +15943,10 @@ async function tokens(username, password, twofactor = null) {
 }
 async function hydrateJarFromDB(j, userID) {
   try {
+    getBackupModel();
+    if (models_default && typeof models_default.syncAll === "function") {
+      await models_default.syncAll();
+    }
     let ck = null;
     let app = null;
     if (userID) {
@@ -15895,7 +15976,8 @@ async function hydrateJarFromDB(j, userID) {
       }
     }
     return false;
-  } catch {
+  } catch (error) {
+    logger_default(`Failed to hydrate session from SQLite cache: ${errMsg(error)}`, "warn");
     return false;
   }
 }
@@ -16411,24 +16493,21 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
       }
       const tokenMatch = html.match(/DTSGInitialData.*?token":"(.*?)"/);
       if (tokenMatch) fb_dtsg = tokenMatch[1];
+      let cacheReady = false;
       try {
-        if (userID) await backupAppStateSQL(sessionJar, userID);
-      } catch {
-      }
-      Promise.resolve().then(function() {
-        if (models_default && models_default.sequelize && typeof models_default.sequelize.authenticate === "function") {
-          return models_default.sequelize.authenticate();
-        }
-      }).then(function() {
         if (models_default && typeof models_default.syncAll === "function") {
-          return models_default.syncAll();
+          await models_default.syncAll();
+          cacheReady = models_default.isReady === true;
         }
-      }).catch(function(error) {
+      } catch (error) {
         const errorMsg = errMsg(error);
         if (!errorMsg.includes("No Sequelize instance passed")) {
-          logger_default(`Database connection failed: ${errorMsg}`, "warn");
+          logger_default(`SQLite cache initialization failed; cache operations may fail: ${errorMsg}`, "error");
         }
-      });
+      }
+      if (cacheReady && userID) {
+        await backupAppStateSQL(sessionJar, userID);
+      }
       logger_default("FCA fix/update by Cexy (WonFCA)", "info");
       const emitter = new import_node_events2.default();
       const ctxMain = createFcaState({
@@ -16523,7 +16602,7 @@ function loginHelper(appState, Cookie, email, password, globalOptions, callback)
     callback(e);
   }
 }
-var import_node_events2, import_axios4, import_sequelize4, import_tough_cookie3, g, config, axiosBase, requestCore, get2, post2, makeDefaults2, authCore, REGION_MAP, uniqueIndexEnsured, exported, login_helper_impl_default;
+var import_node_events2, import_axios4, import_sequelize5, import_tough_cookie3, g, config, axiosBase, requestCore, get2, post2, makeDefaults2, authCore, REGION_MAP, exported, login_helper_impl_default;
 var init_login_helper_impl = __esm({
   "src/core/login-helper.impl.ts"() {
     "use strict";
@@ -16531,6 +16610,7 @@ var init_login_helper_impl = __esm({
     import_axios4 = __toESM(require("axios"));
     init_attach_legacy_api();
     init_api_registry();
+    init_helpers();
     init_models();
     init_logger();
     init_remoteClient();
@@ -16543,7 +16623,7 @@ var init_login_helper_impl = __esm({
     init_request2();
     init_thread_info_realtime_sync();
     init_state();
-    import_sequelize4 = require("sequelize");
+    import_sequelize5 = require("sequelize");
     import_tough_cookie3 = __toESM(require_cookie3());
     g = globalThis;
     ({ config } = loadConfig());
@@ -16552,7 +16632,6 @@ var init_login_helper_impl = __esm({
     ({ get: get2, post: post2, makeDefaults: makeDefaults2 } = requestCore);
     authCore = createAuthCore({ config, logger: logger_default, axiosBase });
     REGION_MAP = authCore.REGION_MAP;
-    uniqueIndexEnsured = false;
     exported = Object.assign(loginHelper, {
       loginHelper,
       tokensViaAPI,

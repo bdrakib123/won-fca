@@ -1,3 +1,5 @@
+/// <reference path="./global-types.d.ts" />
+
 export {
   login,
   loginAsync,
@@ -9,6 +11,7 @@ export {
   type LoginApiCallback
 } from "./core/auth";
 
+export type Loose = ReturnType<typeof JSON.parse>;
 export { login as default } from "./core/auth";
 export { createDefaultContext, createFcaState, createApiFacade } from "./core/state";
 export { createRequestHelper } from "./core/request";
