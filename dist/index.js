@@ -5403,7 +5403,7 @@ var init_package = __esm({
   "package.json"() {
     package_default = {
       name: "@cexy/wonfca",
-      version: "1.2.1",
+      version: "1.2.2",
       description: "Unofficial Facebook Chat API for Node.js - Interact with Facebook Messenger programmatically",
       main: "dist/cjs.cjs",
       types: "dist/index.d.ts",
@@ -5422,7 +5422,6 @@ var init_package = __esm({
         "scripts/recover-sqlite-cache.cjs",
         "scripts/sqlite-cache-dump.py",
         "README.md",
-        "test/",
         "LICENSE",
         "fca-config.example.json",
         "npm-shrinkwrap.json"
@@ -5470,7 +5469,7 @@ var init_package = __esm({
       },
       homepage: "https://github.com/cexy/won-fca#readme",
       engines: {
-        node: ">=14.0.0"
+        node: ">=20.18.1"
       },
       dependencies: {
         axios: "^1.13.5",
@@ -5485,7 +5484,7 @@ var init_package = __esm({
         ora: "^9.3.0",
         picocolors: "^1.1.1",
         sequelize: "^6.37.6",
-        sqlite3: "^5.1.7",
+        sqlite3: "^6.0.1",
         "totp-generator": "^1.0.0",
         ws: "^8.18.1"
       },
